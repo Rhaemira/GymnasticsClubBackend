@@ -66,7 +66,7 @@ public func configure(_ app: Application) async throws {
     app.migrations.add(EnforceEnrollmentCapacity())
 
     app.commands.use(SeedData(), as: "seed")
-    await app.asyncCommands.use(CreateAdminCommand(), as: "create-admin")
+    app.asyncCommands.use(CreateAdminCommand(), as: "create-admin")
     app.middleware.use(SecurityHeadersMiddleware())
     try routes(app)
 }
