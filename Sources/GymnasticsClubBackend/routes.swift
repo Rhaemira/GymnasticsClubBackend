@@ -58,8 +58,9 @@ func routes(_ app: Application) throws {
     }
 
     protected.post("coaches") { req async throws -> Coach in
-        let coach = try req.content.decode(Coach.self)
-
+        let input = try req.content.decode(WriteCoachDTO.self)
+        try RequestValidation.coach(input)
+        let coach = Coach(fullName: try RequestValidation.name(input.fullName, field: "Coach name"), specialty: try RequestValidation.name(input.specialty, field: "Coach specialty"))
         try await coach.save(on: req.db)
 
         return coach
@@ -76,16 +77,10 @@ func routes(_ app: Application) throws {
             throw Abort(.notFound)
         }
 
-        let update =
-            try req.content.decode(
-                Coach.self
-            )
-
-        coach.fullName =
-            update.fullName
-
-        coach.specialty =
-            update.specialty
+        let update = try req.content.decode(WriteCoachDTO.self)
+        try RequestValidation.coach(update)
+        coach.fullName = try RequestValidation.name(update.fullName, field: "Coach name")
+        coach.specialty = try RequestValidation.name(update.specialty, field: "Coach specialty")
 
         try await coach.save(
             on: req.db
@@ -118,8 +113,13 @@ func routes(_ app: Application) throws {
 
     protected.post("athletes") { req async throws -> Athlete in
 
-        let athlete = try req.content.decode(Athlete.self)
-
+        let input = try req.content.decode(WriteAthleteDTO.self)
+        try RequestValidation.athlete(input)
+        let athlete = Athlete(
+            fullName: try RequestValidation.name(input.fullName, field: "Athlete name"),
+            age: input.age,
+            level: input.level.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
         try await athlete.save(on: req.db)
 
         return athlete
@@ -160,6 +160,10 @@ func routes(_ app: Application) throws {
     protected.post("classes") { req async throws -> Class in
 
         let input = try req.content.decode(CreateClassDTO.self)
+        try RequestValidation.gymClass(input)
+        guard try await Coach.find(input.coachID, on: req.db) != nil else {
+            throw Abort(.notFound, reason: "Coach was not found.")
+        }
 
         let gymClass = Class(
 
@@ -189,6 +193,10 @@ func routes(_ app: Application) throws {
         }
 
         let input = try req.content.decode(CreateClassDTO.self)
+        try RequestValidation.gymClass(input)
+        guard try await Coach.find(input.coachID, on: req.db) != nil else {
+            throw Abort(.notFound, reason: "Coach was not found.")
+        }
 
         gymClass.name = input.name
         gymClass.capacity = input.capacity
@@ -368,6 +376,15 @@ func routes(_ app: Application) throws {
     protected.post("attendance") { req async throws -> AttendanceResponse in
 
         let input = try req.content.decode(CreateAttendanceDTO.self)
+        try RequestValidation.attendance(input)
+        guard try await Athlete.find(input.athleteID, on: req.db) != nil else { throw Abort(.notFound, reason: "Athlete was not found.") }
+        guard try await Class.find(input.classID, on: req.db) != nil else { throw Abort(.notFound, reason: "Class was not found.") }
+        let duplicate = try await Attendance.query(on: req.db)
+            .filter(\\.$athlete.$id == input.athleteID)
+            .filter(\\.$gymClass.$id == input.classID)
+            .filter(\\.$attendedOn == input.attendedOn)
+            .first()
+        guard duplicate == nil else { throw Abort(.conflict, reason: "An attendance record already exists for this athlete, class and timestamp.") }
 
         let attendance = Attendance(
 
@@ -423,6 +440,16 @@ func routes(_ app: Application) throws {
         }
 
         let input = try req.content.decode(CreateAttendanceDTO.self)
+        try RequestValidation.attendance(input)
+        guard try await Athlete.find(input.athleteID, on: req.db) != nil else { throw Abort(.notFound, reason: "Athlete was not found.") }
+        guard try await Class.find(input.classID, on: req.db) != nil else { throw Abort(.notFound, reason: "Class was not found.") }
+        let duplicate = try await Attendance.query(on: req.db)
+            .filter(\\.$athlete.$id == input.athleteID)
+            .filter(\\.$gymClass.$id == input.classID)
+            .filter(\\.$attendedOn == input.attendedOn)
+            .filter(\\.$id != attendance.id!)
+            .first()
+        guard duplicate == nil else { throw Abort(.conflict, reason: "An attendance record already exists for this athlete, class and timestamp.") }
 
         attendance.$athlete.id = input.athleteID
         attendance.$gymClass.id = input.classID
@@ -646,19 +673,11 @@ func routes(_ app: Application) throws {
             throw Abort(.notFound)
         }
 
-        let update =
-            try req.content.decode(
-                Athlete.self
-            )
-
-        athlete.fullName =
-            update.fullName
-
-        athlete.age =
-            update.age
-
-        athlete.level =
-            update.level
+        let update = try req.content.decode(WriteAthleteDTO.self)
+        try RequestValidation.athlete(update)
+        athlete.fullName = try RequestValidation.name(update.fullName, field: "Athlete name")
+        athlete.age = update.age
+        athlete.level = update.level.trimmingCharacters(in: .whitespacesAndNewlines)
 
         try await athlete.save(
             on: req.db
