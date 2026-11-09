@@ -172,7 +172,7 @@ func routes(_ app: Application) throws {
 
         let gymClass = Class(
 
-            name: input.name,
+            name: try RequestValidation.name(input.name, field: "Class name"),
 
             capacity: input.capacity,
 
@@ -203,11 +203,19 @@ func routes(_ app: Application) throws {
             throw Abort(.notFound, reason: "Coach was not found.")
         }
 
-        gymClass.name = input.name
+        gymClass.name = try RequestValidation.name(input.name, field: "Class name")
         gymClass.capacity = input.capacity
         gymClass.$coach.id = input.coachID
 
-        try await gymClass.save(on: req.db)
+        do {
+            try await gymClass.save(on: req.db)
+        } catch {
+            let detail = String(describing: error).lowercased()
+            if detail.contains("class_capacity_below_enrollment") || detail.contains("23514") {
+                throw Abort(.conflict, reason: "Class capacity cannot be lower than its current enrollment.")
+            }
+            throw error
+        }
 
         try await gymClass.$coach.load(on: req.db)
 
