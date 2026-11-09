@@ -14,27 +14,31 @@ public func configure(_ app: Application) async throws {
     }
 
     let defaultTLS = app.environment == .production ? "require" : "prefer"
+    let defaultTLS = app.environment == .production ? "require" : "prefer"
     let tlsMode = Environment.get("DATABASE_TLS")?.lowercased() ?? defaultTLS
     guard ["disable", "prefer", "require"].contains(tlsMode) else {
         throw Abort(.internalServerError, reason: "DATABASE_TLS must be disable, prefer or require.")
     }
-    let tls: PostgresConfiguration.TLS
-    switch tlsMode {
-    case "disable": tls = .disable
-    case "require": tls = .require(try .init(configuration: .clientDefault))
-    default: tls = .prefer(try .init(configuration: .clientDefault))
-    }
 
-    app.databases.use(DatabaseConfigurationFactory.postgres(configuration: .init(
-        hostname: host, port: port, username: username, password: password, database: database, tls: tls
-    )), as: .psql)
+    var databaseURL = URLComponents()
+    databaseURL.scheme = "postgres"
+    databaseURL.host = host
+    databaseURL.port = port
+    databaseURL.user = username
+    databaseURL.password = password
+    databaseURL.path = "/\\(database)"
+    databaseURL.queryItems = [URLQueryItem(name: "tlsmode", value: tlsMode)]
+    guard let connectionURL = databaseURL.url else {
+        throw Abort(.internalServerError, reason: "PostgreSQL connection settings are invalid.")
+    }
+    app.databases.use(try DatabaseConfigurationFactory.postgres(url: connectionURL), as: .psql)
 
     let jsonEncoder = JSONEncoder()
-    let outputFormatter = ISO8601DateFormatter()
-    outputFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
     jsonEncoder.dateEncodingStrategy = .custom { date, encoder in
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         var container = encoder.singleValueContainer()
-        try container.encode(outputFormatter.string(from: date))
+        try container.encode(formatter.string(from: date))
     }
 
     let jsonDecoder = JSONDecoder()
@@ -49,7 +53,8 @@ public func configure(_ app: Application) async throws {
         if let date = standard.date(from: value) { return date }
         throw DecodingError.dataCorruptedError(in: container, debugDescription: "Expected ISO-8601 UTC timestamp.")
     }
-    ContentConfiguration.global.use(encoder: jsonEncoder, decoder: jsonDecoder, for: .json)
+    ContentConfiguration.global.use(encoder: jsonEncoder, for: .json)
+    ContentConfiguration.global.use(decoder: jsonDecoder, for: .json)
 
     app.migrations.add(CreateCoach())
     app.migrations.add(CreateAthlete())

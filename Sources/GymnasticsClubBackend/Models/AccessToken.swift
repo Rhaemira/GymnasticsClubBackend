@@ -1,4 +1,5 @@
 import Fluent
+import Foundation
 
 final class AccessToken: Model, @unchecked Sendable {
     static let schema = "access_tokens"
