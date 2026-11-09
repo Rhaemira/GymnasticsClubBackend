@@ -94,38 +94,22 @@ func routes(_ app: Application) throws {
         return coach
     }
     
-    protected.delete("coaches", ":coachID") { req async throws -> HTTPStatus in
-
-        guard let coachID = req.parameters.get("coachID", as: UUID.self) else {
-            throw Abort(.badRequest)
+        protected.delete("coaches", ":coachID") { req async throws -> HTTPStatus in
+        guard let coachID = req.parameters.get("coachID", as: UUID.self) else { throw Abort(.badRequest, reason: "Invalid coach identifier.") }
+        try await req.db.transaction { database in
+            guard let coach = try await Coach.find(coachID, on: database) else { throw Abort(.notFound, reason: "Coach was not found.") }
+            let classes = try await Class.query(on: database).filter(\\.$coach.$id == coachID).all()
+            for gymClass in classes {
+                guard let classID = gymClass.id else { continue }
+                try await Attendance.query(on: database).filter(\\.$gymClass.$id == classID).delete()
+                try await Enrollment.query(on: database).filter(\\.$gymClass.$id == classID).delete()
+                try await gymClass.delete(on: database)
+            }
+            try await coach.delete(on: database)
         }
-
-        // Find every class owned by this coach
-        let classes = try await Class.query(on: req.db)
-            .filter(\.$coach.$id == coachID)
-            .all()
-
-        // Delete enrollments, then each class
-        for gymClass in classes {
-
-            guard let classID = gymClass.id else { continue }
-
-            try await Enrollment.query(on: req.db)
-                .filter(\.$gymClass.$id == classID)
-                .delete()
-
-            try await gymClass.delete(on: req.db)
-        }
-
-        // Finally delete the coach
-        guard let coach = try await Coach.find(coachID, on: req.db) else {
-            throw Abort(.notFound)
-        }
-
-        try await coach.delete(on: req.db)
-
         return .ok
     }
+
     // Athletes
 
     protected.get("athletes") { req async throws -> [Athlete] in
@@ -234,25 +218,17 @@ func routes(_ app: Application) throws {
 
     }
     
-    protected.delete("classes", ":classID") { req async throws -> HTTPStatus in
-
-        guard let classID = req.parameters.get("classID", as: UUID.self) else {
-            throw Abort(.badRequest)
+        protected.delete("classes", ":classID") { req async throws -> HTTPStatus in
+        guard let classID = req.parameters.get("classID", as: UUID.self) else { throw Abort(.badRequest, reason: "Invalid class identifier.") }
+        try await req.db.transaction { database in
+            guard let gymClass = try await Class.find(classID, on: database) else { throw Abort(.notFound, reason: "Class was not found.") }
+            try await Attendance.query(on: database).filter(\\.$gymClass.$id == classID).delete()
+            try await Enrollment.query(on: database).filter(\\.$gymClass.$id == classID).delete()
+            try await gymClass.delete(on: database)
         }
-
-        try await Enrollment.query(on: req.db)
-            .filter(\.$gymClass.$id == classID)
-            .delete()
-
-        guard let gymClass = try await Class.find(classID, on: req.db) else {
-            throw Abort(.notFound)
-        }
-
-        try await gymClass.delete(on: req.db)
-
         return .ok
     }
-    
+
     // Enrollments
     
     protected.get("enrollments") { req async throws -> [EnrollmentResponse] in
@@ -693,44 +669,14 @@ func routes(_ app: Application) throws {
     
     // Athelete DELETE
     
-    protected.delete("athletes", ":athleteID") { req async throws -> HTTPStatus in
-
-        guard let athleteID =
-            req.parameters.get(
-                "athleteID",
-                as: UUID.self
-            )
-        else {
-            throw Abort(.badRequest)
+        protected.delete("athletes", ":athleteID") { req async throws -> HTTPStatus in
+        guard let athleteID = req.parameters.get("athleteID", as: UUID.self) else { throw Abort(.badRequest, reason: "Invalid athlete identifier.") }
+        try await req.db.transaction { database in
+            guard let athlete = try await Athlete.find(athleteID, on: database) else { throw Abort(.notFound, reason: "Athlete was not found.") }
+            try await Enrollment.query(on: database).filter(\\.$athlete.$id == athleteID).delete()
+            try await Attendance.query(on: database).filter(\\.$athlete.$id == athleteID).delete()
+            try await athlete.delete(on: database)
         }
-
-        try await Enrollment
-            .query(on: req.db)
-            .filter(
-                \.$athlete.$id == athleteID
-            )
-            .delete()
-
-        try await Attendance
-            .query(on: req.db)
-            .filter(
-                \.$athlete.$id == athleteID
-            )
-            .delete()
-
-        guard let athlete =
-            try await Athlete.find(
-                athleteID,
-                on: req.db
-            )
-        else {
-            throw Abort(.notFound)
-        }
-
-        try await athlete.delete(
-            on: req.db
-        )
-
         return .ok
     }
 
