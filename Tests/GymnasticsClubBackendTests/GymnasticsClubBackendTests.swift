@@ -64,4 +64,43 @@ struct GymnasticsClubBackendTests {
             })
         }
     }
+    @Test("Valid login grants access to protected athlete routes")
+    func loginAndCreateAthlete() async throws {
+        try await withApp { app in
+            let admin = AdminUser(email: "admin@example.test", passwordHash: try Bcrypt.hash("correct-horse-battery-staple"))
+            try await admin.save(on: app.db)
+            try await app.testing().test(.POST, "/auth/login", beforeRequest: { request in
+                try request.content.encode(LoginRequest(email: "admin@example.test", password: "correct-horse-battery-staple"))
+            }, afterResponse: { response async throws in
+                #expect(response.status == .ok)
+                let login = try response.content.decode(LoginResponse.self)
+                try await app.testing().test(.POST, "/athletes", beforeRequest: { request in
+                    request.headers.add(name: "Authorization", value: "Bearer \(login.token)")
+                    try request.content.encode(WriteAthleteDTO(fullName: "Taylor Gymnast", age: 14, level: "Beginner"))
+                }, afterResponse: { created async throws in
+                    #expect(created.status == .ok)
+                    let athletes = try await Athlete.query(on: app.db).all()
+                    #expect(athletes.count == 1)
+                    #expect(athletes.first?.fullName == "Taylor Gymnast")
+                })
+            })
+        }
+    }
+
+    @Test("Athlete validation rejects invalid ages and whitespace-only names")
+    func invalidAthleteIsRejected() async throws {
+        try await withApp { app in
+            let admin = AdminUser(email: "admin-validation@example.test", passwordHash: try Bcrypt.hash("correct-horse-battery-staple"))
+            try await admin.save(on: app.db)
+            let rawToken = SecureAccessToken.generate()
+            try await AccessToken(userID: admin.requireID(), tokenHash: SecureAccessToken.digest(rawToken), expiresAt: .distantFuture).save(on: app.db)
+            try await app.testing().test(.POST, "/athletes", beforeRequest: { request in
+                request.headers.add(name: "Authorization", value: "Bearer \(rawToken)")
+                try request.content.encode(WriteAthleteDTO(fullName: "   ", age: 0, level: "Beginner"))
+            }, afterResponse: { response async in
+                #expect(response.status == .badRequest)
+            })
+        }
+    }
+
 }
