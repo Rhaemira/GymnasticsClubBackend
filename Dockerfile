@@ -1,7 +1,7 @@
 FROM swift:6.1-noble AS build
 WORKDIR /build
 COPY Package.swift Package.resolved ./
-RUN swift package resolve --force-resolved-versions
+RUN swift package resolve
 COPY . .
 RUN swift build -c release --product GymnasticsClubBackend --static-swift-stdlib
 
