@@ -1,4 +1,5 @@
 import Fluent
+import ConsoleKit
 import Vapor
 
 struct CreateAdminCommand: AsyncCommand {
