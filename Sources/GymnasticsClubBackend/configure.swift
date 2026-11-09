@@ -9,7 +9,7 @@ public func configure(_ app: Application) async throws {
           let username = Environment.get("DATABASE_USERNAME"),
           let password = Environment.get("DATABASE_PASSWORD"),
           let database = Environment.get("DATABASE_NAME"),
-          !host.isEmpty, !username.isEmpty, !database.isEmpty else {
+          !host.isEmpty, !username.isEmpty, !password.isEmpty, !database.isEmpty, (1...65535).contains(port) else {
         throw Abort(.internalServerError, reason: "Database configuration incomplete. Set DATABASE_HOST, DATABASE_PORT, DATABASE_NAME, DATABASE_USERNAME and DATABASE_PASSWORD.")
     }
 
