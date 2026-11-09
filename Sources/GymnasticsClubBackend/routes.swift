@@ -21,14 +21,19 @@ func routes(_ app: Application) throws {
         let input = try req.content.decode(LoginRequest.self)
         let email = input.email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !email.isEmpty, !input.password.isEmpty else { throw Abort(.badRequest, reason: "Email and password are required.") }
-        let key = "\(req.remoteAddress?.ipAddress ?? "unknown"):\(email)"
-        guard await loginRateLimiter.isAllowed(key) else { throw Abort(.tooManyRequests, reason: "Too many login attempts. Try again later.") }
+        let ipKey = "ip:\(req.remoteAddress?.ipAddress ?? "unknown")"
+        let accountKey = "account:\(email)"
+        guard await loginRateLimiter.isAllowed(ipKey), await loginRateLimiter.isAllowed(accountKey) else {
+            throw Abort(.tooManyRequests, reason: "Too many login attempts. Try again later.")
+        }
         guard let user = try await AdminUser.query(on: req.db).filter(\.$email == email).first(),
               try Bcrypt.verify(input.password, created: user.passwordHash) else {
-            await loginRateLimiter.recordFailure(key)
+            await loginRateLimiter.recordFailure(ipKey)
+            await loginRateLimiter.recordFailure(accountKey)
             throw Abort(.unauthorized, reason: "Email or password is incorrect.")
         }
-        await loginRateLimiter.reset(key)
+        await loginRateLimiter.reset(ipKey)
+        await loginRateLimiter.reset(accountKey)
         let ttl = Int(Environment.get("AUTH_TOKEN_TTL_SECONDS") ?? "43200") ?? 43200
         guard (900...86400).contains(ttl) else { throw Abort(.internalServerError, reason: "AUTH_TOKEN_TTL_SECONDS must be between 900 and 86400.") }
         let rawToken = SecureAccessToken.generate()
