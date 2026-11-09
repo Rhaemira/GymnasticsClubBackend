@@ -37,6 +37,7 @@ let package = Package(
             dependencies: [
                 .target(name: "GymnasticsClubBackend"),
                 .product(name: "VaporTesting", package: "vapor"),
+                .product(name: "Vapor", package: "vapor"),
             ],
             swiftSettings: swiftSettings
         )

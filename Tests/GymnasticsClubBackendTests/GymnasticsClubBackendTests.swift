@@ -1,4 +1,5 @@
 @testable import GymnasticsClubBackend
+import Vapor
 import VaporTesting
 import Testing
 import Fluent
