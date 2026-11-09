@@ -1,4 +1,5 @@
 import Fluent
+import Vapor
 import SQLKit
 
 /// PostgreSQL row locking serializes all enrollments for a given class.
