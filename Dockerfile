@@ -3,11 +3,11 @@ WORKDIR /build
 COPY Package.swift Package.resolved ./
 RUN swift package resolve --force-resolved-versions
 COPY . .
-RUN swift build -c release --product GymnasticsClubBackend
+RUN swift build -c release --product GymnasticsClubBackend --static-swift-stdlib
 
 FROM ubuntu:noble
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl libjemalloc2 \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --create-home --home-dir /app vapor
 WORKDIR /app

@@ -12,7 +12,8 @@ public func configure(_ app: Application) async throws {
         throw Abort(.internalServerError, reason: "Database configuration incomplete. Set DATABASE_HOST, DATABASE_PORT, DATABASE_NAME, DATABASE_USERNAME and DATABASE_PASSWORD.")
     }
 
-    let tlsMode = Environment.get("DATABASE_TLS")?.lowercased() ?? "prefer"
+    let defaultTLS = app.environment == .production ? "require" : "prefer"
+    let tlsMode = Environment.get("DATABASE_TLS")?.lowercased() ?? defaultTLS
     guard ["disable", "prefer", "require"].contains(tlsMode) else {
         throw Abort(.internalServerError, reason: "DATABASE_TLS must be disable, prefer or require.")
     }
