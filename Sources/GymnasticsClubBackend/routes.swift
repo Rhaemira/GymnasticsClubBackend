@@ -255,21 +255,59 @@ func routes(_ app: Application) throws {
     
     // Enrollments
     
-    protected.get("enrollments") { req async throws -> [Enrollment] in
-        try await Enrollment.query(on: req.db).all()
+    protected.get("enrollments") { req async throws -> [EnrollmentResponse] in
+        let records = try await Enrollment.query(on: req.db)
+            .with(\\.$athlete)
+            .with(\\.$gymClass)
+            .all()
+        return records.map {
+            EnrollmentResponse(
+                id: $0.id,
+                athlete: AthleteAttendanceResponse(id: $0.athlete.id, fullName: $0.athlete.fullName),
+                gymClass: ClassAttendanceResponse(id: $0.gymClass.id, name: $0.gymClass.name)
+            )
+        }
     }
 
-    protected.post("enrollments") { req async throws -> Enrollment in
+    protected.post("enrollments") { req async throws -> EnrollmentResponse in
+        let input = try req.content.decode(CreateEnrollmentDTO.self)
+        guard try await Athlete.find(input.athleteID, on: req.db) != nil else {
+            throw Abort(.notFound, reason: "Athlete was not found.")
+        }
+        guard try await Class.find(input.classID, on: req.db) != nil else {
+            throw Abort(.notFound, reason: "Class was not found.")
+        }
+        let enrollment = Enrollment(athleteID: input.athleteID, classID: input.classID)
+        do {
+            try await enrollment.save(on: req.db)
+        } catch {
+            let message = String(describing: error).lowercased()
+            if message.contains("unique") || message.contains("duplicate") {
+                throw Abort(.conflict, reason: "This athlete is already enrolled in the class.")
+            }
+            if message.contains("capacity") || message.contains("23514") {
+                throw Abort(.conflict, reason: "This class has reached its capacity.")
+            }
+            throw error
+        }
+        try await enrollment.$athlete.load(on: req.db)
+        try await enrollment.$gymClass.load(on: req.db)
+        return EnrollmentResponse(
+            id: enrollment.id,
+            athlete: AthleteAttendanceResponse(id: enrollment.athlete.id, fullName: enrollment.athlete.fullName),
+            gymClass: ClassAttendanceResponse(id: enrollment.gymClass.id, name: enrollment.gymClass.name)
+        )
+    }
 
-        let enrollment =
-            try req.content.decode(
-                Enrollment.self
-            )
-
-        try await enrollment
-            .save(on: req.db)
-
-        return enrollment
+    protected.delete("enrollments", ":enrollmentID") { req async throws -> HTTPStatus in
+        guard let id = req.parameters.get("enrollmentID", as: UUID.self) else {
+            throw Abort(.badRequest, reason: "Invalid enrollment identifier.")
+        }
+        guard let enrollment = try await Enrollment.find(id, on: req.db) else {
+            throw Abort(.notFound, reason: "Enrollment was not found.")
+        }
+        try await enrollment.delete(on: req.db)
+        return .ok
     }
     
     // Dashboard

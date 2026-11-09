@@ -35,6 +35,7 @@ public func configure(_ app: Application) async throws {
     // FixCascadeDeletes is intentionally NOT registered: its prepare() drops populated tables.
     app.migrations.add(CreateAdminUser())
     app.migrations.add(CreateAccessToken())
+    app.migrations.add(EnforceEnrollmentCapacity())
 
     app.commands.use(SeedData(), as: "seed")
     app.commands.use(CreateAdminCommand(), as: "create-admin")
