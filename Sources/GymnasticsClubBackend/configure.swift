@@ -1,3 +1,4 @@
+import Foundation
 import Fluent
 import FluentPostgresDriver
 import Vapor
@@ -27,6 +28,28 @@ public func configure(_ app: Application) async throws {
     app.databases.use(DatabaseConfigurationFactory.postgres(configuration: .init(
         hostname: host, port: port, username: username, password: password, database: database, tls: tls
     )), as: .psql)
+
+    let jsonEncoder = JSONEncoder()
+    let outputFormatter = ISO8601DateFormatter()
+    outputFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    jsonEncoder.dateEncodingStrategy = .custom { date, encoder in
+        var container = encoder.singleValueContainer()
+        try container.encode(outputFormatter.string(from: date))
+    }
+
+    let jsonDecoder = JSONDecoder()
+    jsonDecoder.dateDecodingStrategy = .custom { decoder in
+        let container = try decoder.singleValueContainer()
+        let value = try container.decode(String.self)
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = fractional.date(from: value) { return date }
+        let standard = ISO8601DateFormatter()
+        standard.formatOptions = [.withInternetDateTime]
+        if let date = standard.date(from: value) { return date }
+        throw DecodingError.dataCorruptedError(in: container, debugDescription: "Expected ISO-8601 UTC timestamp.")
+    }
+    ContentConfiguration.global.use(encoder: jsonEncoder, decoder: jsonDecoder, for: .json)
 
     app.migrations.add(CreateCoach())
     app.migrations.add(CreateAthlete())
