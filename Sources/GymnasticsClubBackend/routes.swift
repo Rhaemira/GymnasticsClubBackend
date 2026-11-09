@@ -2,18 +2,62 @@ import Fluent
 import Vapor
 
 func routes(_ app: Application) throws {
+    let protected = app.grouped(AccessTokenAuthenticator(), AdminUser.guardMiddleware())
 
     app.get {_ in 
         "Gymnastics Club API"
     }
+    app.get("health") { req async -> Response in
+        do {
+            _ = try await Coach.query(on: req.db).count()
+            return Response(status: .ok, headers: ["Content-Type": "application/json"], body: .init(string: #"{"status":"ok","database":"ready"}"#))
+        } catch {
+            req.logger.error("Health check database query failed: \\(error.localizedDescription)")
+            return Response(status: .serviceUnavailable, headers: ["Content-Type": "application/json"], body: .init(string: #"{"status":"unavailable","database":"unavailable"}"#))
+        }
+    }
+
+    app.post("auth", "login") { req async throws -> LoginResponse in
+        let input = try req.content.decode(LoginRequest.self)
+        let email = input.email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !email.isEmpty, !input.password.isEmpty else { throw Abort(.badRequest, reason: "Email and password are required.") }
+        let key = "\\(req.remoteAddress?.ipAddress ?? "unknown"):\\(email)"
+        guard await loginRateLimiter.isAllowed(key) else { throw Abort(.tooManyRequests, reason: "Too many login attempts. Try again later.") }
+        guard let user = try await AdminUser.query(on: req.db).filter(\\.$email == email).first(),
+              try Bcrypt.verify(input.password, created: user.passwordHash) else {
+            await loginRateLimiter.recordFailure(key)
+            throw Abort(.unauthorized, reason: "Email or password is incorrect.")
+        }
+        await loginRateLimiter.reset(key)
+        let ttl = Int(Environment.get("AUTH_TOKEN_TTL_SECONDS") ?? "43200") ?? 43200
+        guard (900...86400).contains(ttl) else { throw Abort(.internalServerError, reason: "AUTH_TOKEN_TTL_SECONDS must be between 900 and 86400.") }
+        let rawToken = SecureAccessToken.generate()
+        let expiresAt = Date().addingTimeInterval(TimeInterval(ttl))
+        try await AccessToken(userID: user.requireID(), tokenHash: SecureAccessToken.digest(rawToken), expiresAt: expiresAt).save(on: req.db)
+        return LoginResponse(token: rawToken, expiresAt: expiresAt, user: AdminUserResponse(id: try user.requireID(), email: user.email))
+    }
+
+    protected.get("auth", "me") { req async throws -> AdminUserResponse in
+        let user = try req.auth.require(AdminUser.self)
+        return AdminUserResponse(id: try user.requireID(), email: user.email)
+    }
+
+    protected.post("auth", "logout") { req async throws -> HTTPStatus in
+        guard let rawToken = req.headers.bearerAuthorization?.token else { throw Abort(.unauthorized) }
+        guard let token = try await AccessToken.query(on: req.db).filter(\\.$tokenHash == SecureAccessToken.digest(rawToken)).first() else { return .noContent }
+        token.revokedAt = .now
+        try await token.save(on: req.db)
+        return .noContent
+    }
+
 
     // Coaches
 
-    app.get("coaches") { req async throws -> [Coach] in
+    protected.get("coaches") { req async throws -> [Coach] in
         try await Coach.query(on: req.db).all()
     }
 
-    app.post("coaches") { req async throws -> Coach in
+    protected.post("coaches") { req async throws -> Coach in
         let coach = try req.content.decode(Coach.self)
 
         try await coach.save(on: req.db)
@@ -21,7 +65,7 @@ func routes(_ app: Application) throws {
         return coach
     }
     
-    app.put("coaches", ":coachID") { req async throws -> Coach in
+    protected.put("coaches", ":coachID") { req async throws -> Coach in
 
         guard let coach =
             try await Coach.find(
@@ -50,7 +94,7 @@ func routes(_ app: Application) throws {
         return coach
     }
     
-    app.delete("coaches", ":coachID") { req async throws -> HTTPStatus in
+    protected.delete("coaches", ":coachID") { req async throws -> HTTPStatus in
 
         guard let coachID = req.parameters.get("coachID", as: UUID.self) else {
             throw Abort(.badRequest)
@@ -84,11 +128,11 @@ func routes(_ app: Application) throws {
     }
     // Athletes
 
-    app.get("athletes") { req async throws -> [Athlete] in
+    protected.get("athletes") { req async throws -> [Athlete] in
         try await Athlete.query(on: req.db).all()
     }
 
-    app.post("athletes") { req async throws -> Athlete in
+    protected.post("athletes") { req async throws -> Athlete in
 
         let athlete = try req.content.decode(Athlete.self)
 
@@ -99,7 +143,7 @@ func routes(_ app: Application) throws {
     
     // Classes
     
-    app.get("classes") { req async throws -> [ClassResponse] in
+    protected.get("classes") { req async throws -> [ClassResponse] in
 
         let classes = try await Class.query(on: req.db)
             .with(\.$coach)
@@ -129,7 +173,7 @@ func routes(_ app: Application) throws {
 
     }
 
-    app.post("classes") { req async throws -> Class in
+    protected.post("classes") { req async throws -> Class in
 
         let input = try req.content.decode(CreateClassDTO.self)
 
@@ -149,7 +193,7 @@ func routes(_ app: Application) throws {
         
     }
     
-    app.put("classes", ":classID") { req async throws -> ClassResponse in
+    protected.put("classes", ":classID") { req async throws -> ClassResponse in
 
         guard let gymClass = try await Class.find(
             req.parameters.get("classID"),
@@ -190,7 +234,7 @@ func routes(_ app: Application) throws {
 
     }
     
-    app.delete("classes", ":classID") { req async throws -> HTTPStatus in
+    protected.delete("classes", ":classID") { req async throws -> HTTPStatus in
 
         guard let classID = req.parameters.get("classID", as: UUID.self) else {
             throw Abort(.badRequest)
@@ -211,11 +255,11 @@ func routes(_ app: Application) throws {
     
     // Enrollments
     
-    app.get("enrollments") { req async throws -> [Enrollment] in
+    protected.get("enrollments") { req async throws -> [Enrollment] in
         try await Enrollment.query(on: req.db).all()
     }
 
-    app.post("enrollments") { req async throws -> Enrollment in
+    protected.post("enrollments") { req async throws -> Enrollment in
 
         let enrollment =
             try req.content.decode(
@@ -230,7 +274,7 @@ func routes(_ app: Application) throws {
     
     // Dashboard
     
-    app.get("dashboard") {req async throws-> [DashboardResponse] in
+    protected.get("dashboard") {req async throws-> [DashboardResponse] in
 
         let coaches =
             try await Coach.query(on:req.db)
@@ -270,7 +314,7 @@ func routes(_ app: Application) throws {
     
     // MARK: - Attendance
 
-    app.get("attendance") { req async throws -> [AttendanceResponse] in
+    protected.get("attendance") { req async throws -> [AttendanceResponse] in
 
         let records = try await Attendance.query(on: req.db)
             .with(\.$athlete)
@@ -307,7 +351,7 @@ func routes(_ app: Application) throws {
 
     }
 
-    app.post("attendance") { req async throws -> AttendanceResponse in
+    protected.post("attendance") { req async throws -> AttendanceResponse in
 
         let input = try req.content.decode(CreateAttendanceDTO.self)
 
@@ -353,7 +397,7 @@ func routes(_ app: Application) throws {
 
     }
     
-    app.put("attendance", ":attendanceID") { req async throws -> AttendanceResponse in
+    protected.put("attendance", ":attendanceID") { req async throws -> AttendanceResponse in
 
         guard let attendance = try await Attendance.find(
             req.parameters.get("attendanceID"),
@@ -401,7 +445,7 @@ func routes(_ app: Application) throws {
 
     }
     
-    app.delete("attendance", ":attendanceID") { req async throws -> HTTPStatus in
+    protected.delete("attendance", ":attendanceID") { req async throws -> HTTPStatus in
 
         guard let attendance = try await Attendance.find(
 
@@ -423,7 +467,7 @@ func routes(_ app: Application) throws {
     
     // Reports
     
-    app.get("reports") { req async throws -> ReportsResponse in
+    protected.get("reports") { req async throws -> ReportsResponse in
 
         async let athletes =
             Athlete.query(on: req.db).count()
@@ -449,7 +493,7 @@ func routes(_ app: Application) throws {
         )
     }
     
-    app.get("analytics") { req async throws -> AnalyticsResponse in
+    protected.get("analytics") { req async throws -> AnalyticsResponse in
 
         async let athleteCount =
             Athlete.query(on: req.db).count()
@@ -577,7 +621,7 @@ func routes(_ app: Application) throws {
     
     // Athelete UPDATE
     
-    app.put("athletes", ":athleteID") { req async throws -> Athlete in
+    protected.put("athletes", ":athleteID") { req async throws -> Athlete in
 
         guard let athlete =
             try await Athlete.find(
@@ -611,7 +655,7 @@ func routes(_ app: Application) throws {
     
     // Athelete DELETE
     
-    app.delete("athletes", ":athleteID") { req async throws -> HTTPStatus in
+    protected.delete("athletes", ":athleteID") { req async throws -> HTTPStatus in
 
         guard let athleteID =
             req.parameters.get(
