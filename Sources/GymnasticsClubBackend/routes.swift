@@ -12,7 +12,7 @@ func routes(_ app: Application) throws {
             _ = try await Coach.query(on: req.db).count()
             return Response(status: .ok, headers: ["Content-Type": "application/json"], body: .init(string: #"{"status":"ok","database":"ready"}"#))
         } catch {
-            req.logger.error("Health check database query failed: \\(error.localizedDescription)")
+            req.logger.error("Health check database query failed: \(error.localizedDescription)")
             return Response(status: .serviceUnavailable, headers: ["Content-Type": "application/json"], body: .init(string: #"{"status":"unavailable","database":"unavailable"}"#))
         }
     }
@@ -21,9 +21,9 @@ func routes(_ app: Application) throws {
         let input = try req.content.decode(LoginRequest.self)
         let email = input.email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !email.isEmpty, !input.password.isEmpty else { throw Abort(.badRequest, reason: "Email and password are required.") }
-        let key = "\\(req.remoteAddress?.ipAddress ?? "unknown"):\\(email)"
+        let key = "\(req.remoteAddress?.ipAddress ?? "unknown"):\(email)"
         guard await loginRateLimiter.isAllowed(key) else { throw Abort(.tooManyRequests, reason: "Too many login attempts. Try again later.") }
-        guard let user = try await AdminUser.query(on: req.db).filter(\\.$email == email).first(),
+        guard let user = try await AdminUser.query(on: req.db).filter(\.$email == email).first(),
               try Bcrypt.verify(input.password, created: user.passwordHash) else {
             await loginRateLimiter.recordFailure(key)
             throw Abort(.unauthorized, reason: "Email or password is incorrect.")
@@ -44,7 +44,7 @@ func routes(_ app: Application) throws {
 
     protected.post("auth", "logout") { req async throws -> HTTPStatus in
         guard let rawToken = req.headers.bearerAuthorization?.token else { throw Abort(.unauthorized) }
-        guard let token = try await AccessToken.query(on: req.db).filter(\\.$tokenHash == SecureAccessToken.digest(rawToken)).first() else { return .noContent }
+        guard let token = try await AccessToken.query(on: req.db).filter(\.$tokenHash == SecureAccessToken.digest(rawToken)).first() else { return .noContent }
         token.revokedAt = .now
         try await token.save(on: req.db)
         return .noContent
@@ -93,11 +93,11 @@ func routes(_ app: Application) throws {
         guard let coachID = req.parameters.get("coachID", as: UUID.self) else { throw Abort(.badRequest, reason: "Invalid coach identifier.") }
         try await req.db.transaction { database in
             guard let coach = try await Coach.find(coachID, on: database) else { throw Abort(.notFound, reason: "Coach was not found.") }
-            let classes = try await Class.query(on: database).filter(\\.$coach.$id == coachID).all()
+            let classes = try await Class.query(on: database).filter(\.$coach.$id == coachID).all()
             for gymClass in classes {
                 guard let classID = gymClass.id else { continue }
-                try await Attendance.query(on: database).filter(\\.$gymClass.$id == classID).delete()
-                try await Enrollment.query(on: database).filter(\\.$gymClass.$id == classID).delete()
+                try await Attendance.query(on: database).filter(\.$gymClass.$id == classID).delete()
+                try await Enrollment.query(on: database).filter(\.$gymClass.$id == classID).delete()
                 try await gymClass.delete(on: database)
             }
             try await coach.delete(on: database)
@@ -230,8 +230,8 @@ func routes(_ app: Application) throws {
         guard let classID = req.parameters.get("classID", as: UUID.self) else { throw Abort(.badRequest, reason: "Invalid class identifier.") }
         try await req.db.transaction { database in
             guard let gymClass = try await Class.find(classID, on: database) else { throw Abort(.notFound, reason: "Class was not found.") }
-            try await Attendance.query(on: database).filter(\\.$gymClass.$id == classID).delete()
-            try await Enrollment.query(on: database).filter(\\.$gymClass.$id == classID).delete()
+            try await Attendance.query(on: database).filter(\.$gymClass.$id == classID).delete()
+            try await Enrollment.query(on: database).filter(\.$gymClass.$id == classID).delete()
             try await gymClass.delete(on: database)
         }
         return .ok
@@ -241,8 +241,8 @@ func routes(_ app: Application) throws {
     
     protected.get("enrollments") { req async throws -> [EnrollmentResponse] in
         let records = try await Enrollment.query(on: req.db)
-            .with(\\.$athlete)
-            .with(\\.$gymClass)
+            .with(\.$athlete)
+            .with(\.$gymClass)
             .all()
         return records.map {
             EnrollmentResponse(
@@ -380,9 +380,9 @@ func routes(_ app: Application) throws {
         guard try await Athlete.find(input.athleteID, on: req.db) != nil else { throw Abort(.notFound, reason: "Athlete was not found.") }
         guard try await Class.find(input.classID, on: req.db) != nil else { throw Abort(.notFound, reason: "Class was not found.") }
         let duplicate = try await Attendance.query(on: req.db)
-            .filter(\\.$athlete.$id == input.athleteID)
-            .filter(\\.$gymClass.$id == input.classID)
-            .filter(\\.$attendedOn == input.attendedOn)
+            .filter(\.$athlete.$id == input.athleteID)
+            .filter(\.$gymClass.$id == input.classID)
+            .filter(\.$attendedOn == input.attendedOn)
             .first()
         guard duplicate == nil else { throw Abort(.conflict, reason: "An attendance record already exists for this athlete, class and timestamp.") }
 
@@ -443,11 +443,12 @@ func routes(_ app: Application) throws {
         try RequestValidation.attendance(input)
         guard try await Athlete.find(input.athleteID, on: req.db) != nil else { throw Abort(.notFound, reason: "Athlete was not found.") }
         guard try await Class.find(input.classID, on: req.db) != nil else { throw Abort(.notFound, reason: "Class was not found.") }
+        guard let attendanceID = attendance.id else { throw Abort(.internalServerError, reason: "Attendance identifier is missing.") }
         let duplicate = try await Attendance.query(on: req.db)
-            .filter(\\.$athlete.$id == input.athleteID)
-            .filter(\\.$gymClass.$id == input.classID)
-            .filter(\\.$attendedOn == input.attendedOn)
-            .filter(\\.$id != attendance.id!)
+            .filter(\.$athlete.$id == input.athleteID)
+            .filter(\.$gymClass.$id == input.classID)
+            .filter(\.$attendedOn == input.attendedOn)
+            .filter(\.$id != attendanceID)
             .first()
         guard duplicate == nil else { throw Abort(.conflict, reason: "An attendance record already exists for this athlete, class and timestamp.") }
 
@@ -692,8 +693,8 @@ func routes(_ app: Application) throws {
         guard let athleteID = req.parameters.get("athleteID", as: UUID.self) else { throw Abort(.badRequest, reason: "Invalid athlete identifier.") }
         try await req.db.transaction { database in
             guard let athlete = try await Athlete.find(athleteID, on: database) else { throw Abort(.notFound, reason: "Athlete was not found.") }
-            try await Enrollment.query(on: database).filter(\\.$athlete.$id == athleteID).delete()
-            try await Attendance.query(on: database).filter(\\.$athlete.$id == athleteID).delete()
+            try await Enrollment.query(on: database).filter(\.$athlete.$id == athleteID).delete()
+            try await Attendance.query(on: database).filter(\.$athlete.$id == athleteID).delete()
             try await athlete.delete(on: database)
         }
         return .ok
