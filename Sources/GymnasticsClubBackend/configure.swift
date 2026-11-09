@@ -14,7 +14,6 @@ public func configure(_ app: Application) async throws {
     }
 
     let defaultTLS = app.environment == .production ? "require" : "prefer"
-    let defaultTLS = app.environment == .production ? "require" : "prefer"
     let tlsMode = Environment.get("DATABASE_TLS")?.lowercased() ?? defaultTLS
     guard ["disable", "prefer", "require"].contains(tlsMode) else {
         throw Abort(.internalServerError, reason: "DATABASE_TLS must be disable, prefer or require.")
@@ -26,7 +25,7 @@ public func configure(_ app: Application) async throws {
     databaseURL.port = port
     databaseURL.user = username
     databaseURL.password = password
-    databaseURL.path = "/\\(database)"
+    databaseURL.path = "/\(database)"
     databaseURL.queryItems = [URLQueryItem(name: "tlsmode", value: tlsMode)]
     guard let connectionURL = databaseURL.url else {
         throw Abort(.internalServerError, reason: "PostgreSQL connection settings are invalid.")
