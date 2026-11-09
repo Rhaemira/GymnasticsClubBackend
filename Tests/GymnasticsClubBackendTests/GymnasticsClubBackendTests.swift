@@ -93,7 +93,8 @@ struct GymnasticsClubBackendTests {
             let admin = AdminUser(email: "admin-validation@example.test", passwordHash: try Bcrypt.hash("correct-horse-battery-staple"))
             try await admin.save(on: app.db)
             let rawToken = SecureAccessToken.generate()
-            try await AccessToken(userID: admin.requireID(), tokenHash: SecureAccessToken.digest(rawToken), expiresAt: .distantFuture).save(on: app.db)
+            let adminID = try admin.requireID()
+            try await AccessToken(userID: adminID, tokenHash: SecureAccessToken.digest(rawToken), expiresAt: .distantFuture).save(on: app.db)
             try await app.testing().test(.POST, "/athletes", beforeRequest: { request in
                 request.headers.add(name: "Authorization", value: "Bearer \(rawToken)")
                 try request.content.encode(WriteAthleteDTO(fullName: "   ", age: 0, level: "Beginner"))
