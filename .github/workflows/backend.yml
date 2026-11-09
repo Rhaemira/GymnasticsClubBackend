@@ -1,0 +1,44 @@
+name: Backend CI
+on:
+  push:
+    branches: [main, "engineering/**"]
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: gymnastics_test
+          POSTGRES_USER: gymnastics_test
+          POSTGRES_PASSWORD: test-only-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U gymnastics_test -d gymnastics_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      DATABASE_HOST: 127.0.0.1
+      DATABASE_PORT: "5432"
+      DATABASE_NAME: gymnastics_test
+      DATABASE_USERNAME: gymnastics_test
+      DATABASE_PASSWORD: test-only-password
+      DATABASE_TLS: disable
+      AUTH_TOKEN_TTL_SECONDS: "3600"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.1"
+      - name: Resolve dependencies
+        run: swift package resolve
+      - name: Build
+        run: swift build
+      - name: Run PostgreSQL integration tests
+        run: swift test
