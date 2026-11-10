@@ -72,20 +72,27 @@ func routes(_ app: Application) throws {
     protected.post("coaches") { req async throws -> Coach in
         let input = try req.content.decode(WriteCoachDTO.self)
         try RequestValidation.coach(input)
-        let coach = Coach(fullName: try RequestValidation.name(input.fullName, field: "Coach name"), specialty: try RequestValidation.name(input.specialty, field: "Coach specialty"))
-        try await coach.save(on: req.db)
-
+        let coach = Coach(
+            fullName: try RequestValidation.name(input.fullName, field: "Coach name"),
+            specialty: try RequestValidation.name(input.specialty, field: "Coach specialty")
+        )
+        do {
+            try await coach.save(on: req.db)
+        } catch {
+            if isPostgreSQLUniqueViolation(error) {
+                throw Abort(.conflict, reason: "A coach with this name already exists.")
+            }
+            throw error
+        }
         return coach
     }
     
     protected.put("coaches", ":coachID") { req async throws -> Coach in
 
-        guard let coach =
-            try await Coach.find(
-                req.parameters.get("coachID"),
-                on: req.db
-            )
-        else {
+        guard let coachID = req.parameters.get("coachID", as: UUID.self) else {
+            throw Abort(.badRequest, reason: "Invalid coach identifier.")
+        }
+        guard let coach = try await Coach.find(coachID, on: req.db) else {
             throw Abort(.notFound)
         }
 
@@ -94,9 +101,14 @@ func routes(_ app: Application) throws {
         coach.fullName = try RequestValidation.name(update.fullName, field: "Coach name")
         coach.specialty = try RequestValidation.name(update.specialty, field: "Coach specialty")
 
-        try await coach.save(
-            on: req.db
-        )
+        do {
+            try await coach.save(on: req.db)
+        } catch {
+            if isPostgreSQLUniqueViolation(error) {
+                throw Abort(.conflict, reason: "A coach with this name already exists.")
+            }
+            throw error
+        }
 
         return coach
     }
@@ -195,10 +207,10 @@ func routes(_ app: Application) throws {
     
     protected.put("classes", ":classID") { req async throws -> ClassResponse in
 
-        guard let gymClass = try await Class.find(
-            req.parameters.get("classID"),
-            on: req.db
-        ) else {
+        guard let classID = req.parameters.get("classID", as: UUID.self) else {
+            throw Abort(.badRequest, reason: "Invalid class identifier.")
+        }
+        guard let gymClass = try await Class.find(classID, on: req.db) else {
 
             throw Abort(.notFound)
 
@@ -461,10 +473,10 @@ func routes(_ app: Application) throws {
     
     protected.put("attendance", ":attendanceID") { req async throws -> AttendanceResponse in
 
-        guard let attendance = try await Attendance.find(
-            req.parameters.get("attendanceID"),
-            on: req.db
-        ) else {
+        guard let attendanceID = req.parameters.get("attendanceID", as: UUID.self) else {
+            throw Abort(.badRequest, reason: "Invalid attendance identifier.")
+        }
+        guard let attendance = try await Attendance.find(attendanceID, on: req.db) else {
 
             throw Abort(.notFound)
 
@@ -527,13 +539,10 @@ func routes(_ app: Application) throws {
     
     protected.delete("attendance", ":attendanceID") { req async throws -> HTTPStatus in
 
-        guard let attendance = try await Attendance.find(
-
-            req.parameters.get("attendanceID"),
-
-            on: req.db
-
-        ) else {
+        guard let attendanceID = req.parameters.get("attendanceID", as: UUID.self) else {
+            throw Abort(.badRequest, reason: "Invalid attendance identifier.")
+        }
+        guard let attendance = try await Attendance.find(attendanceID, on: req.db) else {
 
             throw Abort(.notFound)
 
@@ -703,12 +712,10 @@ func routes(_ app: Application) throws {
     
     protected.put("athletes", ":athleteID") { req async throws -> Athlete in
 
-        guard let athlete =
-            try await Athlete.find(
-                req.parameters.get("athleteID"),
-                on: req.db
-            )
-        else {
+        guard let athleteID = req.parameters.get("athleteID", as: UUID.self) else {
+            throw Abort(.badRequest, reason: "Invalid athlete identifier.")
+        }
+        guard let athlete = try await Athlete.find(athleteID, on: req.db) else {
             throw Abort(.notFound)
         }
 
@@ -743,8 +750,13 @@ func routes(_ app: Application) throws {
 
 /// Maps the database's unique index to the same client-facing conflict used by
 /// the preflight query. The database constraint remains authoritative under races.
+private func isPostgreSQLUniqueViolation(_ error: any Error) -> Bool {
+    let details = String(reflecting: error).lowercased()
+    return details.contains("23505") || details.contains("unique constraint")
+}
+
 private func isAttendanceUniquenessViolation(_ error: any Error) -> Bool {
     let details = String(reflecting: error).lowercased()
     return details.contains("attendance_unique_athlete_class_timestamp") ||
-        details.contains("23505")
+        isPostgreSQLUniqueViolation(error)
 }

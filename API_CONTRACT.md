@@ -38,23 +38,23 @@ Login response:
 | POST | `/auth/logout` | — | 204 No Content | 401 missing/invalid token |
 | GET | `/athletes` | — | `Athlete[]` | 401 |
 | POST | `/athletes` | `WriteAthleteDTO` | `Athlete` | 400 validation |
-| PUT | `/athletes/:athleteID` | `WriteAthleteDTO` | `Athlete` | 400 validation; 404 missing athlete |
+| PUT | `/athletes/:athleteID` | `WriteAthleteDTO` | `Athlete` | 400 invalid UUID/validation; 404 missing athlete |
 | DELETE | `/athletes/:athleteID` | — | 200 OK | 400 invalid UUID; 404 missing athlete |
 | GET | `/coaches` | — | `Coach[]` | 401 |
-| POST | `/coaches` | `WriteCoachDTO` | `Coach` | 400 validation |
-| PUT | `/coaches/:coachID` | `WriteCoachDTO` | `Coach` | 400 validation; 404 missing coach |
+| POST | `/coaches` | `WriteCoachDTO` | `Coach` | 400 validation; 409 duplicate name |
+| PUT | `/coaches/:coachID` | `WriteCoachDTO` | `Coach` | 400 invalid UUID/validation; 404 missing coach; 409 duplicate name |
 | DELETE | `/coaches/:coachID` | — | 200 OK | 400 invalid UUID; 404 missing coach |
 | GET | `/classes` | — | `ClassResponse[]` | 401 |
 | POST | `/classes` | `CreateClassDTO` | `Class` | 400 validation; 404 missing coach |
-| PUT | `/classes/:classID` | `CreateClassDTO` | `ClassResponse` | 400 validation; 404 missing class/coach; 409 capacity conflict |
+| PUT | `/classes/:classID` | `CreateClassDTO` | `ClassResponse` | 400 invalid UUID/validation; 404 missing class/coach; 409 capacity conflict |
 | DELETE | `/classes/:classID` | — | 200 OK | 400 invalid UUID; 404 missing class |
 | GET | `/enrollments` | — | `EnrollmentResponse[]` | 401 |
 | POST | `/enrollments` | `CreateEnrollmentDTO` | `EnrollmentResponse` | 404 missing athlete/class; 409 duplicate/full class |
 | DELETE | `/enrollments/:enrollmentID` | — | 200 OK | 400 invalid UUID; 404 missing enrollment |
 | GET | `/attendance` | — | `AttendanceResponse[]` | 401 |
 | POST | `/attendance` | `CreateAttendanceDTO` | `AttendanceResponse` | 400 invalid/future date; 404 missing athlete/class; 409 duplicate |
-| PUT | `/attendance/:attendanceID` | `CreateAttendanceDTO` | `AttendanceResponse` | 400 invalid/future date; 404 missing record/athlete/class; 409 duplicate |
-| DELETE | `/attendance/:attendanceID` | — | 200 OK | 404 missing attendance |
+| PUT | `/attendance/:attendanceID` | `CreateAttendanceDTO` | `AttendanceResponse` | 400 invalid UUID/date; 404 missing record/athlete/class; 409 duplicate |
+| DELETE | `/attendance/:attendanceID` | — | 200 OK | 400 invalid UUID; 404 missing attendance |
 | GET | `/reports` | — | `ReportsResponse` | 401 |
 | GET | `/analytics` | — | `AnalyticsResponse` | 401 |
 | GET | `/dashboard` | — | Legacy `DashboardResponse[]` | 401 |

@@ -628,3 +628,46 @@ extension GymnasticsClubBackendTests {
         #expect(await limiter.isAllowed(key, now: now.addingTimeInterval(10)))
     }
 }
+
+
+extension GymnasticsClubBackendTests {
+    @Test("Malformed UUID route identifiers are rejected as bad requests")
+    func malformedIdentifiersAreBadRequests() async throws {
+        try await withApp { app in
+            let token = try await makeAuthenticatedToken(on: app, email: "invalid-paths@example.test")
+            let paths = [
+                "/athletes/not-a-uuid",
+                "/coaches/not-a-uuid",
+                "/classes/not-a-uuid",
+                "/attendance/not-a-uuid"
+            ]
+            for path in paths {
+                try await app.testing().test(.DELETE, path, beforeRequest: { request in
+                    request.headers.add(name: "Authorization", value: "Bearer \\(token)")
+                }, afterResponse: { response async in
+                    #expect(response.status == .badRequest)
+                })
+            }
+        }
+    }
+
+    @Test("Duplicate coach names return a conflict instead of a database error")
+    func duplicateCoachNameReturnsConflict() async throws {
+        try await withApp { app in
+            let token = try await makeAuthenticatedToken(on: app, email: "duplicate-coach@example.test")
+            let request = WriteCoachDTO(fullName: "Unique Coach", specialty: "Artistic")
+            try await app.testing().test(.POST, "/coaches", beforeRequest: { requestContext in
+                requestContext.headers.add(name: "Authorization", value: "Bearer \\(token)")
+                try requestContext.content.encode(request)
+            }, afterResponse: { response async in
+                #expect(response.status == .ok)
+            })
+            try await app.testing().test(.POST, "/coaches", beforeRequest: { requestContext in
+                requestContext.headers.add(name: "Authorization", value: "Bearer \\(token)")
+                try requestContext.content.encode(request)
+            }, afterResponse: { response async in
+                #expect(response.status == .conflict)
+            })
+        }
+    }
+}
