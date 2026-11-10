@@ -7,5 +7,5 @@ set -a; source .env; set +a
 read -r -p "Administrator email: " ADMIN_EMAIL
 read -r -s -p "Initial password (12+ characters): " ADMIN_INITIAL_PASSWORD; printf '\n'
 export ADMIN_EMAIL ADMIN_INITIAL_PASSWORD
-swift run create-admin
+swift run GymnasticsClubBackend create-admin
 unset ADMIN_INITIAL_PASSWORD

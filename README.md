@@ -54,7 +54,7 @@ The script prompts for the administrator email and password without echoing the 
 
 ```bash
 set -a; source .env; set +a
-swift run seed
+swift run GymnasticsClubBackend seed
 ```
 
 The seed command is idempotent: it reuses matching sample records and does not duplicate enrollments. Use it only in development or a disposable test environment.

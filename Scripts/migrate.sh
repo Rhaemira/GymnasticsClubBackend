@@ -6,4 +6,4 @@ cd "$ROOT_DIR"
 set -a; source .env; set +a
 : "${DATABASE_HOST:?Missing DATABASE_HOST}"; : "${DATABASE_PORT:?Missing DATABASE_PORT}"; : "${DATABASE_NAME:?Missing DATABASE_NAME}"; : "${DATABASE_USERNAME:?Missing DATABASE_USERNAME}"; : "${DATABASE_PASSWORD:?Missing DATABASE_PASSWORD}"
 if command -v pg_isready >/dev/null 2>&1; then pg_isready -h "$DATABASE_HOST" -p "$DATABASE_PORT" -U "$DATABASE_USERNAME" -d "$DATABASE_NAME" >/dev/null || { echo "PostgreSQL is not ready." >&2; exit 1; }; fi
-swift run migrate --yes
+swift run GymnasticsClubBackend migrate --yes

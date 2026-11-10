@@ -98,7 +98,7 @@ jobs:
         run: |
           set -euo pipefail
           Scripts/migrate.sh
-          ADMIN_EMAIL=ci-native-admin@example.test ADMIN_INITIAL_PASSWORD=ci-native-password-123 swift run create-admin
+          ADMIN_EMAIL=ci-native-admin@example.test ADMIN_INITIAL_PASSWORD=ci-native-password-123 swift run GymnasticsClubBackend create-admin
           Scripts/start.sh > "$RUNNER_TEMP/gymnastics-vapor.log" 2>&1 &
           SERVER_PID=$!
           trap 'kill "$SERVER_PID" 2>/dev/null || true; wait "$SERVER_PID" 2>/dev/null || true' EXIT

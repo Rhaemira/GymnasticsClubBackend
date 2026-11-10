@@ -28,4 +28,4 @@ if command -v lsof >/dev/null 2>&1 && lsof -nP -iTCP:"$PORT" -sTCP:LISTEN -t >/d
 fi
 
 echo "Starting Gymnastics Club API on 0.0.0.0:$PORT."
-exec swift run serve --hostname 0.0.0.0 --port "$PORT"
+exec swift run GymnasticsClubBackend serve --hostname 0.0.0.0 --port "$PORT"
