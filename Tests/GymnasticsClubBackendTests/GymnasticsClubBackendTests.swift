@@ -671,3 +671,75 @@ extension GymnasticsClubBackendTests {
         }
     }
 }
+
+
+extension GymnasticsClubBackendTests {
+    private struct TimestampPayload: Codable {
+        let attendedOn: Date
+    }
+
+    @Test("Backend date decoder accepts fractional and whole-second ISO-8601 UTC timestamps")
+    func backendDateCodingAcceptsBothTimestampPrecisions() throws {
+        let decoder = BackendDateCoding.makeDecoder()
+        let fractional = Data(#"{"attendedOn":"2026-11-10T12:34:56.123Z"}"#.utf8)
+        let wholeSecond = Data(#"{"attendedOn":"2026-11-10T12:34:56Z"}"#.utf8)
+
+        let fractionalDate = try decoder.decode(TimestampPayload.self, from: fractional).attendedOn
+        let wholeSecondDate = try decoder.decode(TimestampPayload.self, from: wholeSecond).attendedOn
+
+        #expect(abs(fractionalDate.timeIntervalSince1970 - wholeSecondDate.timeIntervalSince1970 - 0.123) < 0.001)
+    }
+
+    @Test("Backend date encoder emits a UTC ISO-8601 timestamp with fractional seconds")
+    func backendDateEncoderUsesFractionalUTC() throws {
+        let encoder = BackendDateCoding.makeEncoder()
+        let payload = TimestampPayload(attendedOn: Date(timeIntervalSince1970: 1_800_000_000.123))
+        let encoded = try encoder.encode(payload)
+        let json = String(decoding: encoded, as: UTF8.self)
+
+        #expect(json.contains("2027-01-15T08:00:00.123Z"))
+    }
+
+    @Test("Concurrent attendance inserts cannot bypass the database unique index")
+    func concurrentAttendanceInsertIsUnique() async throws {
+        try await withApp { app in
+            let coach = Coach(fullName: "Concurrent Attendance Coach", specialty: "Artistic")
+            let athlete = Athlete(fullName: "Concurrent Attendance Athlete", age: 12, level: "Beginner")
+            try await coach.save(on: app.db)
+            try await athlete.save(on: app.db)
+            let gymClass = Class(name: "Concurrent Attendance Class", capacity: 10, coachID: try coach.requireID())
+            try await gymClass.save(on: app.db)
+
+            let athleteID = try athlete.requireID()
+            let classID = try gymClass.requireID()
+            let timestamp = Date(timeIntervalSince1970: 1_700_000_100.125)
+            let database = app.db
+
+            let outcomes = await withTaskGroup(of: Bool.self, returning: [Bool].self) { group in
+                for _ in 0..<8 {
+                    group.addTask {
+                        do {
+                            try await Attendance(
+                                athleteID: athleteID,
+                                classID: classID,
+                                attendedOn: timestamp
+                            ).save(on: database)
+                            return true
+                        } catch {
+                            return false
+                        }
+                    }
+                }
+
+                var values: [Bool] = []
+                for await value in group {
+                    values.append(value)
+                }
+                return values
+            }
+
+            #expect(outcomes.filter { $0 }.count == 1)
+            #expect(try await Attendance.query(on: app.db).count() == 1)
+        }
+    }
+}

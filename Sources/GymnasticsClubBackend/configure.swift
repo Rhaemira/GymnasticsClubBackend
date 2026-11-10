@@ -50,28 +50,8 @@ public func configure(_ app: Application) async throws {
     }
     app.databases.use(try DatabaseConfigurationFactory.postgres(url: connectionURL), as: .psql)
 
-    let jsonEncoder = JSONEncoder()
-    jsonEncoder.dateEncodingStrategy = .custom { date, encoder in
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        var container = encoder.singleValueContainer()
-        try container.encode(formatter.string(from: date))
-    }
-
-    let jsonDecoder = JSONDecoder()
-    jsonDecoder.dateDecodingStrategy = .custom { decoder in
-        let container = try decoder.singleValueContainer()
-        let value = try container.decode(String.self)
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = fractional.date(from: value) { return date }
-        let standard = ISO8601DateFormatter()
-        standard.formatOptions = [.withInternetDateTime]
-        if let date = standard.date(from: value) { return date }
-        throw DecodingError.dataCorruptedError(in: container, debugDescription: "Expected ISO-8601 UTC timestamp.")
-    }
-    ContentConfiguration.global.use(encoder: jsonEncoder, for: .json)
-    ContentConfiguration.global.use(decoder: jsonDecoder, for: .json)
+    ContentConfiguration.global.use(encoder: BackendDateCoding.makeEncoder(), for: .json)
+    ContentConfiguration.global.use(decoder: BackendDateCoding.makeDecoder(), for: .json)
 
     app.migrations.add(CreateCoach())
     app.migrations.add(CreateAthlete())
