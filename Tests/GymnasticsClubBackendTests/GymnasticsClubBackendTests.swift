@@ -643,7 +643,7 @@ extension GymnasticsClubBackendTests {
             ]
             for path in paths {
                 try await app.testing().test(.DELETE, path, beforeRequest: { request in
-                    request.headers.add(name: "Authorization", value: "Bearer \\(token)")
+                    request.headers.add(name: "Authorization", value: "Bearer \(token)")
                 }, afterResponse: { response async in
                     #expect(response.status == .badRequest)
                 })
@@ -657,13 +657,13 @@ extension GymnasticsClubBackendTests {
             let token = try await makeAuthenticatedToken(on: app, email: "duplicate-coach@example.test")
             let request = WriteCoachDTO(fullName: "Unique Coach", specialty: "Artistic")
             try await app.testing().test(.POST, "/coaches", beforeRequest: { requestContext in
-                requestContext.headers.add(name: "Authorization", value: "Bearer \\(token)")
+                requestContext.headers.add(name: "Authorization", value: "Bearer \(token)")
                 try requestContext.content.encode(request)
             }, afterResponse: { response async in
                 #expect(response.status == .ok)
             })
             try await app.testing().test(.POST, "/coaches", beforeRequest: { requestContext in
-                requestContext.headers.add(name: "Authorization", value: "Bearer \\(token)")
+                requestContext.headers.add(name: "Authorization", value: "Bearer \(token)")
                 try requestContext.content.encode(request)
             }, afterResponse: { response async in
                 #expect(response.status == .conflict)
