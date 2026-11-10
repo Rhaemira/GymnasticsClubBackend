@@ -19,6 +19,19 @@ public func configure(_ app: Application) async throws {
         throw Abort(.internalServerError, reason: "DATABASE_TLS must be disable, prefer or require.")
     }
 
+    // Production connections require TLS, except for the explicitly isolated
+    // Docker Compose database service on its private, unpublished bridge network.
+    let approvedPrivateComposeLink =
+        host == "db" &&
+        tlsMode == "disable" &&
+        Environment.get("DATABASE_TLS_ALLOW_PRIVATE_COMPOSE_LINK") == "true"
+    guard app.environment != .production || tlsMode == "require" || approvedPrivateComposeLink else {
+        throw Abort(
+            .internalServerError,
+            reason: "Production PostgreSQL connections require DATABASE_TLS=require. The only exception is the isolated Compose database service."
+        )
+    }
+
     var databaseURL = URLComponents()
     databaseURL.scheme = "postgres"
     databaseURL.host = host
@@ -64,8 +77,9 @@ public func configure(_ app: Application) async throws {
     app.migrations.add(CreateAdminUser())
     app.migrations.add(CreateAccessToken())
     app.migrations.add(EnforceEnrollmentCapacity())
+    app.migrations.add(EnforceAttendanceUniqueness())
 
-    app.commands.use(SeedData(), as: "seed")
+    app.asyncCommands.use(SeedData(), as: "seed")
     app.asyncCommands.use(CreateAdminCommand(), as: "create-admin")
     app.middleware.use(SecurityHeadersMiddleware())
     try routes(app)

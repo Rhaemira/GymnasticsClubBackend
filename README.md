@@ -57,7 +57,7 @@ set -a; source .env; set +a
 swift run seed
 ```
 
-Only run seed against a disposable development database; it adds sample records each time.
+The seed command is idempotent: it reuses matching sample records and does not duplicate enrollments. Use it only in development or a disposable test environment.
 
 ## Docker Compose
 
@@ -94,7 +94,7 @@ All database settings are required by the application at startup:
 | PORT | Native startup script port |
 | LOG_LEVEL | Vapor log level |
 
-Never commit .env files. Production must use a secret manager or deployment environment, a unique database role/password, and TLS to PostgreSQL where supported.
+Never commit .env files. Production must use a secret manager or deployment environment, a unique database role/password, and `DATABASE_TLS=require`. The Compose stack uses an unpublished PostgreSQL service on its isolated Docker network; its explicit `DATABASE_TLS_ALLOW_PRIVATE_COMPOSE_LINK` exception is scoped to the service hostname `db`. Do not enable that exception for an externally reachable database.
 
 ## Authentication and API
 
@@ -128,7 +128,9 @@ Fluent tracks migrations in its migration table. The historical `FixCascadeDelet
 swift test
 ```
 
-The integration suite requires a real PostgreSQL test database. Set the same DATABASE_* variables to a dedicated disposable test database before running tests. Never point tests at production data.
+The integration suite requires a real PostgreSQL test database. Set the same DATABASE_* variables to a dedicated disposable test database before running tests. Never point tests at production data. Coverage includes protected routes, token expiry and revocation, validation, class capacity, concurrent enrollment attempts, attendance uniqueness, dependent-record deletion, reports and analytics.
+
+The attendance uniqueness migration is additive. It never removes historical records. If it detects duplicate historical attendance rows, it aborts with a clear error rather than silently discarding data. Review those rows and resolve them through an explicit, audited data-maintenance operation before retrying.
 
 ## Production deployment
 

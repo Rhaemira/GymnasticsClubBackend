@@ -26,13 +26,14 @@ services:
       DATABASE_NAME: ${DATABASE_NAME:-gymnastics_club}
       DATABASE_USERNAME: ${DATABASE_USERNAME:-gymnastics_dev}
       DATABASE_PASSWORD: ${DATABASE_PASSWORD:?Set DATABASE_PASSWORD in .env}
-      DATABASE_TLS: disable
+      DATABASE_TLS: ${DATABASE_TLS:-disable}
+      DATABASE_TLS_ALLOW_PRIVATE_COMPOSE_LINK: "true"
       AUTH_TOKEN_TTL_SECONDS: ${AUTH_TOKEN_TTL_SECONDS:-43200}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     depends_on:
       db:
         condition: service_healthy
-    command: ["migrate", "--yes"]
+    command: ["migrate", "--yes", "--env", "production"]
     restart: "no"
 
   app:
@@ -43,6 +44,7 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+    command: ["serve", "--env", "production", "--hostname", "0.0.0.0", "--port", "8080"]
     ports:
       - "${APP_BIND_ADDRESS:-127.0.0.1}:8080:8080"
     healthcheck:

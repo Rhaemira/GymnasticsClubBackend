@@ -106,3 +106,249 @@ struct GymnasticsClubBackendTests {
     }
 
 }
+
+
+extension GymnasticsClubBackendTests {
+    private func makeAuthenticatedToken(on app: Application, email: String) async throws -> String {
+        let admin = AdminUser(
+            email: email,
+            passwordHash: try Bcrypt.hash("correct-horse-battery-staple")
+        )
+        try await admin.save(on: app.db)
+        let token = SecureAccessToken.generate()
+        try await AccessToken(
+            userID: admin.requireID(),
+            tokenHash: SecureAccessToken.digest(token),
+            expiresAt: .distantFuture
+        ).save(on: app.db)
+        return token
+    }
+
+    @Test("Enrollment rejects duplicates and enforces class capacity")
+    func enrollmentEnforcesCapacity() async throws {
+        try await withApp { app in
+            let token = try await makeAuthenticatedToken(on: app, email: "enrollment-capacity@example.test")
+            let coach = Coach(fullName: "Capacity Coach", specialty: "Artistic")
+            let firstAthlete = Athlete(fullName: "Capacity Athlete One", age: 12, level: "Beginner")
+            let secondAthlete = Athlete(fullName: "Capacity Athlete Two", age: 13, level: "Beginner")
+            try await coach.save(on: app.db)
+            try await firstAthlete.save(on: app.db)
+            try await secondAthlete.save(on: app.db)
+            let gymClass = Class(name: "Capacity Class", capacity: 1, coachID: try coach.requireID())
+            try await gymClass.save(on: app.db)
+
+            let firstRequest = CreateEnrollmentDTO(
+                athleteID: try firstAthlete.requireID(),
+                classID: try gymClass.requireID()
+            )
+            try await app.testing().test(.POST, "/enrollments", beforeRequest: { request in
+                request.headers.add(name: "Authorization", value: "Bearer \(token)")
+                try request.content.encode(firstRequest)
+            }, afterResponse: { response async in
+                #expect(response.status == .ok)
+            })
+
+            try await app.testing().test(.POST, "/enrollments", beforeRequest: { request in
+                request.headers.add(name: "Authorization", value: "Bearer \(token)")
+                try request.content.encode(firstRequest)
+            }, afterResponse: { response async in
+                #expect(response.status == .conflict)
+            })
+
+            let secondRequest = CreateEnrollmentDTO(
+                athleteID: try secondAthlete.requireID(),
+                classID: try gymClass.requireID()
+            )
+            try await app.testing().test(.POST, "/enrollments", beforeRequest: { request in
+                request.headers.add(name: "Authorization", value: "Bearer \(token)")
+                try request.content.encode(secondRequest)
+            }, afterResponse: { response async in
+                #expect(response.status == .conflict)
+            })
+            #expect(try await Enrollment.query(on: app.db).count() == 1)
+        }
+    }
+
+    @Test("Concurrent enrollment inserts cannot exceed class capacity")
+    func concurrentEnrollmentRespectsCapacity() async throws {
+        try await withApp { app in
+            let coach = Coach(fullName: "Concurrent Coach", specialty: "Artistic")
+            try await coach.save(on: app.db)
+            let gymClass = Class(name: "Concurrent Class", capacity: 2, coachID: try coach.requireID())
+            try await gymClass.save(on: app.db)
+
+            var athleteIDs: [UUID] = []
+            for index in 0..<8 {
+                let athlete = Athlete(fullName: "Concurrent Athlete \(index)", age: 10 + index, level: "Beginner")
+                try await athlete.save(on: app.db)
+                athleteIDs.append(try athlete.requireID())
+            }
+
+            let database = app.db
+            let classID = try gymClass.requireID()
+            let outcomes = await withTaskGroup(of: Bool.self, returning: [Bool].self) { group in
+                for athleteID in athleteIDs {
+                    group.addTask {
+                        do {
+                            try await Enrollment(athleteID: athleteID, classID: classID).save(on: database)
+                            return true
+                        } catch {
+                            return false
+                        }
+                    }
+                }
+                var values: [Bool] = []
+                for await value in group { values.append(value) }
+                return values
+            }
+
+            #expect(outcomes.filter { $0 }.count == 2)
+            #expect(try await Enrollment.query(on: app.db).count() == 2)
+        }
+    }
+
+    @Test("Attendance rejects duplicate athlete, class and timestamp records")
+    func attendanceRejectsDuplicateTimestamp() async throws {
+        try await withApp { app in
+            let token = try await makeAuthenticatedToken(on: app, email: "attendance-unique@example.test")
+            let coach = Coach(fullName: "Attendance Coach", specialty: "Artistic")
+            let athlete = Athlete(fullName: "Attendance Athlete", age: 12, level: "Beginner")
+            try await coach.save(on: app.db)
+            try await athlete.save(on: app.db)
+            let gymClass = Class(name: "Attendance Class", capacity: 10, coachID: try coach.requireID())
+            try await gymClass.save(on: app.db)
+            let payload = CreateAttendanceDTO(
+                athleteID: try athlete.requireID(),
+                classID: try gymClass.requireID(),
+                attendedOn: Date(timeIntervalSince1970: 1_700_000_000.125)
+            )
+
+            try await app.testing().test(.POST, "/attendance", beforeRequest: { request in
+                request.headers.add(name: "Authorization", value: "Bearer \(token)")
+                try request.content.encode(payload)
+            }, afterResponse: { response async in
+                #expect(response.status == .ok)
+            })
+            try await app.testing().test(.POST, "/attendance", beforeRequest: { request in
+                request.headers.add(name: "Authorization", value: "Bearer \(token)")
+                try request.content.encode(payload)
+            }, afterResponse: { response async in
+                #expect(response.status == .conflict)
+            })
+            #expect(try await Attendance.query(on: app.db).count() == 1)
+        }
+    }
+
+    @Test("Expired bearer tokens are rejected")
+    func expiredTokenIsRejected() async throws {
+        try await withApp { app in
+            let admin = AdminUser(email: "expired-token@example.test", passwordHash: try Bcrypt.hash("correct-horse-battery-staple"))
+            try await admin.save(on: app.db)
+            let token = SecureAccessToken.generate()
+            try await AccessToken(
+                userID: admin.requireID(),
+                tokenHash: SecureAccessToken.digest(token),
+                expiresAt: .distantPast
+            ).save(on: app.db)
+
+            try await app.testing().test(.GET, "/auth/me", beforeRequest: { request in
+                request.headers.add(name: "Authorization", value: "Bearer \(token)")
+            }, afterResponse: { response async in
+                #expect(response.status == .unauthorized)
+            })
+        }
+    }
+
+    @Test("Logout revokes the presented token")
+    func logoutRevokesToken() async throws {
+        try await withApp { app in
+            let token = try await makeAuthenticatedToken(on: app, email: "logout@example.test")
+            try await app.testing().test(.POST, "/auth/logout", beforeRequest: { request in
+                request.headers.add(name: "Authorization", value: "Bearer \(token)")
+            }, afterResponse: { response async in
+                #expect(response.status == .noContent)
+            })
+            try await app.testing().test(.GET, "/auth/me", beforeRequest: { request in
+                request.headers.add(name: "Authorization", value: "Bearer \(token)")
+            }, afterResponse: { response async in
+                #expect(response.status == .unauthorized)
+            })
+        }
+    }
+
+    @Test("Athlete deletion transaction removes related enrollment and attendance")
+    func athleteDeletionPreservesReferentialIntegrity() async throws {
+        try await withApp { app in
+            let token = try await makeAuthenticatedToken(on: app, email: "delete-athlete@example.test")
+            let coach = Coach(fullName: "Deletion Coach", specialty: "Artistic")
+            let athlete = Athlete(fullName: "Deletion Athlete", age: 12, level: "Beginner")
+            try await coach.save(on: app.db)
+            try await athlete.save(on: app.db)
+            let gymClass = Class(name: "Deletion Class", capacity: 10, coachID: try coach.requireID())
+            try await gymClass.save(on: app.db)
+            try await Enrollment(athleteID: athlete.requireID(), classID: gymClass.requireID()).save(on: app.db)
+            try await Attendance(
+                athleteID: athlete.requireID(),
+                classID: gymClass.requireID(),
+                attendedOn: Date(timeIntervalSince1970: 1_700_000_000)
+            ).save(on: app.db)
+
+            try await app.testing().test(.DELETE, "/athletes/\(try athlete.requireID())", beforeRequest: { request in
+                request.headers.add(name: "Authorization", value: "Bearer \(token)")
+            }, afterResponse: { response async in
+                #expect(response.status == .ok)
+            })
+
+            #expect(try await Athlete.query(on: app.db).count() == 0)
+            #expect(try await Enrollment.query(on: app.db).count() == 0)
+            #expect(try await Attendance.query(on: app.db).count() == 0)
+        }
+    }
+
+    @Test("Class capacity cannot be reduced below existing enrollments")
+    func classCapacityCannotUndercutEnrollments() async throws {
+        try await withApp { app in
+            let token = try await makeAuthenticatedToken(on: app, email: "class-capacity-update@example.test")
+            let coach = Coach(fullName: "Update Capacity Coach", specialty: "Artistic")
+            let firstAthlete = Athlete(fullName: "Update Capacity Athlete One", age: 12, level: "Beginner")
+            let secondAthlete = Athlete(fullName: "Update Capacity Athlete Two", age: 13, level: "Beginner")
+            try await coach.save(on: app.db)
+            try await firstAthlete.save(on: app.db)
+            try await secondAthlete.save(on: app.db)
+            let gymClass = Class(name: "Update Capacity Class", capacity: 2, coachID: try coach.requireID())
+            try await gymClass.save(on: app.db)
+            try await Enrollment(athleteID: firstAthlete.requireID(), classID: gymClass.requireID()).save(on: app.db)
+            try await Enrollment(athleteID: secondAthlete.requireID(), classID: gymClass.requireID()).save(on: app.db)
+
+            try await app.testing().test(.PUT, "/classes/\(try gymClass.requireID())", beforeRequest: { request in
+                request.headers.add(name: "Authorization", value: "Bearer \(token)")
+                try request.content.encode(CreateClassDTO(
+                    name: "Update Capacity Class",
+                    capacity: 1,
+                    coachID: try coach.requireID()
+                ))
+            }, afterResponse: { response async in
+                #expect(response.status == .conflict)
+            })
+        }
+    }
+
+    @Test("Reports and analytics return their documented payloads")
+    func reportsAndAnalyticsAreAvailableToAuthenticatedUsers() async throws {
+        try await withApp { app in
+            let token = try await makeAuthenticatedToken(on: app, email: "analytics@example.test")
+            try await app.testing().test(.GET, "/reports", beforeRequest: { request in
+                request.headers.add(name: "Authorization", value: "Bearer \(token)")
+            }, afterResponse: { response async throws in
+                #expect(response.status == .ok)
+                _ = try response.content.decode(ReportsResponse.self)
+            })
+            try await app.testing().test(.GET, "/analytics", beforeRequest: { request in
+                request.headers.add(name: "Authorization", value: "Bearer \(token)")
+            }, afterResponse: { response async throws in
+                #expect(response.status == .ok)
+                _ = try response.content.decode(AnalyticsResponse.self)
+            })
+        }
+    }
+}
