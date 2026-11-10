@@ -473,10 +473,10 @@ func routes(_ app: Application) throws {
     
     protected.put("attendance", ":attendanceID") { req async throws -> AttendanceResponse in
 
-        guard let attendanceID = req.parameters.get("attendanceID", as: UUID.self) else {
+        guard let attendanceIDParam = req.parameters.get("attendanceID", as: UUID.self) else {
             throw Abort(.badRequest, reason: "Invalid attendance identifier.")
         }
-        guard let attendance = try await Attendance.find(attendanceID, on: req.db) else {
+        guard let attendance = try await Attendance.find(attendanceIDParam, on: req.db) else {
 
             throw Abort(.notFound)
 
