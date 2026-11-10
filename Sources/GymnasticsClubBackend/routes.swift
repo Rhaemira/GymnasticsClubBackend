@@ -210,8 +210,12 @@ func routes(_ app: Application) throws {
         do {
             try await gymClass.save(on: req.db)
         } catch {
-            let detail = String(describing: error).lowercased()
-            if detail.contains("class_capacity_below_enrollment") || detail.contains("23514") {
+            // Use reflection so the PostgreSQL driver's structured serverInfo
+            // (constraint message and SQLSTATE) is included in the diagnostic.
+            let detail = String(reflecting: error).lowercased()
+            if detail.contains("class_capacity_below_enrollment") ||
+                detail.contains("class_capacity_exceeded") ||
+                detail.contains("23514") {
                 throw Abort(.conflict, reason: "Class capacity cannot be lower than its current enrollment.")
             }
             throw error
@@ -278,11 +282,11 @@ func routes(_ app: Application) throws {
         do {
             try await enrollment.save(on: req.db)
         } catch {
-            let message = String(describing: error).lowercased()
-            if message.contains("unique") || message.contains("duplicate") {
+            let message = String(reflecting: error).lowercased()
+            if message.contains("unique") || message.contains("duplicate") || message.contains("23505") {
                 throw Abort(.conflict, reason: "This athlete is already enrolled in the class.")
             }
-            if message.contains("capacity") || message.contains("23514") {
+            if message.contains("capacity") || message.contains("23514") || message.contains("class_capacity_exceeded") {
                 throw Abort(.conflict, reason: "This class has reached its capacity.")
             }
             throw error
