@@ -352,3 +352,246 @@ extension GymnasticsClubBackendTests {
         }
     }
 }
+
+
+extension GymnasticsClubBackendTests {
+    @Test("Athlete HTTP routes support create, list, update and delete")
+    func athleteCRUDRoutes() async throws {
+        try await withApp { app in
+            let token = try await makeAuthenticatedToken(on: app, email: "athlete-crud@example.test")
+            try await app.testing().test(.POST, "/athletes", beforeRequest: { request in
+                request.headers.add(name: "Authorization", value: "Bearer \(token)")
+                try request.content.encode(WriteAthleteDTO(fullName: "CRUD Athlete", age: 11, level: "Beginner"))
+            }, afterResponse: { response async in
+                #expect(response.status == .ok)
+            })
+
+            let created = try await Athlete.query(on: app.db)
+                .filter(\.$fullName == "CRUD Athlete")
+                .first()
+            let id = try #require(created?.id)
+
+            try await app.testing().test(.GET, "/athletes", beforeRequest: { request in
+                request.headers.add(name: "Authorization", value: "Bearer \(token)")
+            }, afterResponse: { response async throws in
+                #expect(response.status == .ok)
+                let records = try response.content.decode([Athlete].self)
+                #expect(records.contains { $0.id == id && $0.fullName == "CRUD Athlete" })
+            })
+            try await app.testing().test(.PUT, "/athletes/\(id)", beforeRequest: { request in
+                request.headers.add(name: "Authorization", value: "Bearer \(token)")
+                try request.content.encode(WriteAthleteDTO(fullName: "Updated Athlete", age: 12, level: "Intermediate"))
+            }, afterResponse: { response async throws in
+                #expect(response.status == .ok)
+                let updated = try response.content.decode(Athlete.self)
+                #expect(updated.fullName == "Updated Athlete")
+                #expect(updated.age == 12)
+            })
+            try await app.testing().test(.DELETE, "/athletes/\(id)", beforeRequest: { request in
+                request.headers.add(name: "Authorization", value: "Bearer \(token)")
+            }, afterResponse: { response async in
+                #expect(response.status == .ok)
+            })
+            #expect(try await Athlete.find(id, on: app.db) == nil)
+        }
+    }
+
+    @Test("Coach HTTP routes support create, list, update and delete")
+    func coachCRUDRoutes() async throws {
+        try await withApp { app in
+            let token = try await makeAuthenticatedToken(on: app, email: "coach-crud@example.test")
+            try await app.testing().test(.POST, "/coaches", beforeRequest: { request in
+                request.headers.add(name: "Authorization", value: "Bearer \(token)")
+                try request.content.encode(WriteCoachDTO(fullName: "CRUD Coach", specialty: "Artistic"))
+            }, afterResponse: { response async in
+                #expect(response.status == .ok)
+            })
+
+            let created = try await Coach.query(on: app.db)
+                .filter(\.$fullName == "CRUD Coach")
+                .first()
+            let id = try #require(created?.id)
+
+            try await app.testing().test(.GET, "/coaches", beforeRequest: { request in
+                request.headers.add(name: "Authorization", value: "Bearer \(token)")
+            }, afterResponse: { response async throws in
+                #expect(response.status == .ok)
+                let records = try response.content.decode([Coach].self)
+                #expect(records.contains { $0.id == id && $0.fullName == "CRUD Coach" })
+            })
+            try await app.testing().test(.PUT, "/coaches/\(id)", beforeRequest: { request in
+                request.headers.add(name: "Authorization", value: "Bearer \(token)")
+                try request.content.encode(WriteCoachDTO(fullName: "Updated Coach", specialty: "Rhythmic"))
+            }, afterResponse: { response async throws in
+                #expect(response.status == .ok)
+                let updated = try response.content.decode(Coach.self)
+                #expect(updated.fullName == "Updated Coach")
+                #expect(updated.specialty == "Rhythmic")
+            })
+            try await app.testing().test(.DELETE, "/coaches/\(id)", beforeRequest: { request in
+                request.headers.add(name: "Authorization", value: "Bearer \(token)")
+            }, afterResponse: { response async in
+                #expect(response.status == .ok)
+            })
+            #expect(try await Coach.find(id, on: app.db) == nil)
+        }
+    }
+
+    @Test("Class HTTP routes support create, list, update and transactional delete")
+    func classCRUDAndCascadeRoutes() async throws {
+        try await withApp { app in
+            let token = try await makeAuthenticatedToken(on: app, email: "class-crud@example.test")
+            let coach = Coach(fullName: "Class CRUD Coach", specialty: "Artistic")
+            let athlete = Athlete(fullName: "Class CRUD Athlete", age: 12, level: "Beginner")
+            try await coach.save(on: app.db)
+            try await athlete.save(on: app.db)
+            let coachID = try coach.requireID()
+            let athleteID = try athlete.requireID()
+
+            try await app.testing().test(.POST, "/classes", beforeRequest: { request in
+                request.headers.add(name: "Authorization", value: "Bearer \(token)")
+                try request.content.encode(CreateClassDTO(name: "CRUD Class", capacity: 5, coachID: coachID))
+            }, afterResponse: { response async in
+                #expect(response.status == .ok)
+            })
+
+            let created = try await Class.query(on: app.db)
+                .filter(\.$name == "CRUD Class")
+                .first()
+            let id = try #require(created?.id)
+
+            try await app.testing().test(.GET, "/classes", beforeRequest: { request in
+                request.headers.add(name: "Authorization", value: "Bearer \(token)")
+            }, afterResponse: { response async throws in
+                #expect(response.status == .ok)
+                let records = try response.content.decode([ClassResponse].self)
+                #expect(records.contains { $0.id == id && $0.name == "CRUD Class" && $0.coach.id == coachID })
+            })
+
+            try await app.testing().test(.POST, "/enrollments", beforeRequest: { request in
+                request.headers.add(name: "Authorization", value: "Bearer \(token)")
+                try request.content.encode(CreateEnrollmentDTO(athleteID: athleteID, classID: id))
+            }, afterResponse: { response async in
+                #expect(response.status == .ok)
+            })
+            try await app.testing().test(.POST, "/attendance", beforeRequest: { request in
+                request.headers.add(name: "Authorization", value: "Bearer \(token)")
+                try request.content.encode(CreateAttendanceDTO(
+                    athleteID: athleteID,
+                    classID: id,
+                    attendedOn: Date(timeIntervalSince1970: 1_700_000_010)
+                ))
+            }, afterResponse: { response async in
+                #expect(response.status == .ok)
+            })
+
+            try await app.testing().test(.PUT, "/classes/\(id)", beforeRequest: { request in
+                request.headers.add(name: "Authorization", value: "Bearer \(token)")
+                try request.content.encode(CreateClassDTO(name: "Updated CRUD Class", capacity: 8, coachID: coachID))
+            }, afterResponse: { response async throws in
+                #expect(response.status == .ok)
+                let updated = try response.content.decode(ClassResponse.self)
+                #expect(updated.name == "Updated CRUD Class")
+                #expect(updated.capacity == 8)
+            })
+
+            try await app.testing().test(.DELETE, "/classes/\(id)", beforeRequest: { request in
+                request.headers.add(name: "Authorization", value: "Bearer \(token)")
+            }, afterResponse: { response async in
+                #expect(response.status == .ok)
+            })
+            #expect(try await Class.find(id, on: app.db) == nil)
+            #expect(try await Enrollment.query(on: app.db).count() == 0)
+            #expect(try await Attendance.query(on: app.db).count() == 0)
+        }
+    }
+
+    @Test("Attendance HTTP routes support create, list, update and delete")
+    func attendanceCRUDRoutes() async throws {
+        try await withApp { app in
+            let token = try await makeAuthenticatedToken(on: app, email: "attendance-crud@example.test")
+            let coach = Coach(fullName: "Attendance CRUD Coach", specialty: "Artistic")
+            let athlete = Athlete(fullName: "Attendance CRUD Athlete", age: 12, level: "Beginner")
+            try await coach.save(on: app.db)
+            try await athlete.save(on: app.db)
+            let gymClass = Class(name: "Attendance CRUD Class", capacity: 5, coachID: try coach.requireID())
+            try await gymClass.save(on: app.db)
+            let firstDate = Date(timeIntervalSince1970: 1_700_000_020)
+            let secondDate = Date(timeIntervalSince1970: 1_700_000_030)
+
+            try await app.testing().test(.POST, "/attendance", beforeRequest: { request in
+                request.headers.add(name: "Authorization", value: "Bearer \(token)")
+                try request.content.encode(CreateAttendanceDTO(
+                    athleteID: try athlete.requireID(),
+                    classID: try gymClass.requireID(),
+                    attendedOn: firstDate
+                ))
+            }, afterResponse: { response async in
+                #expect(response.status == .ok)
+            })
+
+            let created = try await Attendance.query(on: app.db)
+                .filter(\.$athlete.$id == (try athlete.requireID()))
+                .filter(\.$gymClass.$id == (try gymClass.requireID()))
+                .filter(\.$attendedOn == firstDate)
+                .first()
+            let id = try #require(created?.id)
+
+            try await app.testing().test(.GET, "/attendance", beforeRequest: { request in
+                request.headers.add(name: "Authorization", value: "Bearer \(token)")
+            }, afterResponse: { response async throws in
+                #expect(response.status == .ok)
+                let records = try response.content.decode([AttendanceResponse].self)
+                #expect(records.contains { $0.id == id })
+            })
+            try await app.testing().test(.PUT, "/attendance/\(id)", beforeRequest: { request in
+                request.headers.add(name: "Authorization", value: "Bearer \(token)")
+                try request.content.encode(CreateAttendanceDTO(
+                    athleteID: try athlete.requireID(),
+                    classID: try gymClass.requireID(),
+                    attendedOn: secondDate
+                ))
+            }, afterResponse: { response async throws in
+                #expect(response.status == .ok)
+                let updated = try response.content.decode(AttendanceResponse.self)
+                #expect(abs(updated.attendedOn.timeIntervalSince(secondDate)) < 0.001)
+            })
+            try await app.testing().test(.DELETE, "/attendance/\(id)", beforeRequest: { request in
+                request.headers.add(name: "Authorization", value: "Bearer \(token)")
+            }, afterResponse: { response async in
+                #expect(response.status == .ok)
+            })
+            #expect(try await Attendance.find(id, on: app.db) == nil)
+        }
+    }
+
+    @Test("Coach deletion transaction removes associated classes, enrollments and attendance")
+    func coachDeletionPreservesReferentialIntegrity() async throws {
+        try await withApp { app in
+            let token = try await makeAuthenticatedToken(on: app, email: "coach-delete@example.test")
+            let coach = Coach(fullName: "Cascade Coach", specialty: "Artistic")
+            let athlete = Athlete(fullName: "Cascade Athlete", age: 12, level: "Beginner")
+            try await coach.save(on: app.db)
+            try await athlete.save(on: app.db)
+            let gymClass = Class(name: "Cascade Class", capacity: 5, coachID: try coach.requireID())
+            try await gymClass.save(on: app.db)
+            try await Enrollment(athleteID: try athlete.requireID(), classID: try gymClass.requireID()).save(on: app.db)
+            try await Attendance(
+                athleteID: try athlete.requireID(),
+                classID: try gymClass.requireID(),
+                attendedOn: Date(timeIntervalSince1970: 1_700_000_040)
+            ).save(on: app.db)
+
+            try await app.testing().test(.DELETE, "/coaches/\(try coach.requireID())", beforeRequest: { request in
+                request.headers.add(name: "Authorization", value: "Bearer \(token)")
+            }, afterResponse: { response async in
+                #expect(response.status == .ok)
+            })
+
+            #expect(try await Coach.query(on: app.db).count() == 0)
+            #expect(try await Class.query(on: app.db).count() == 0)
+            #expect(try await Enrollment.query(on: app.db).count() == 0)
+            #expect(try await Attendance.query(on: app.db).count() == 0)
+        }
+    }
+}

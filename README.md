@@ -128,7 +128,7 @@ Fluent tracks migrations in its migration table. The historical `FixCascadeDelet
 swift test
 ```
 
-The integration suite requires a real PostgreSQL test database. Set the same DATABASE_* variables to a dedicated disposable test database before running tests. Never point tests at production data. Coverage includes protected routes, token expiry and revocation, validation, class capacity, concurrent enrollment attempts, attendance uniqueness, dependent-record deletion, reports and analytics.
+The integration suite requires a real PostgreSQL test database. Set the same DATABASE_* variables to a dedicated disposable test database before running tests. Never point tests at production data. Coverage includes protected routes, token expiry and revocation, athlete/coach/class/attendance CRUD, validation, class capacity, concurrent enrollment attempts, attendance uniqueness, transactional dependent-record deletion, reports and analytics.
 
 The attendance uniqueness migration is additive. It never removes historical records. If it detects duplicate historical attendance rows, it aborts with a clear error rather than silently discarding data. Review those rows and resolve them through an explicit, audited data-maintenance operation before retrying.
 
