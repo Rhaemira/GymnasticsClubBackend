@@ -736,7 +736,7 @@ func routes(_ app: Application) throws {
 
 /// Maps the database's unique index to the same client-facing conflict used by
 /// the preflight query. The database constraint remains authoritative under races.
-private func isAttendanceUniquenessViolation(_ error: Error) -> Bool {
+private func isAttendanceUniquenessViolation(_ error: any Error) -> Bool {
     let details = String(reflecting: error).lowercased()
     return details.contains("attendance_unique_athlete_class_timestamp") ||
         details.contains("23505")

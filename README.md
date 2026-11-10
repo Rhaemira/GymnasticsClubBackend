@@ -32,7 +32,7 @@ Scripts/migrate.sh
 Scripts/start.sh
 ```
 
-The server listens on `0.0.0.0:8080`. Verify database readiness:
+The startup script verifies PostgreSQL readiness and checks that the configured API port is available before launching Vapor. It listens on `0.0.0.0:8080` by default so a physical iPhone on the same trusted development network can reach the Mac. Override `PORT` in `.env` to use another port. Verify database readiness:
 
 ```bash
 curl -i http://127.0.0.1:8080/health
@@ -58,6 +58,20 @@ swift run seed
 ```
 
 The seed command is idempotent: it reuses matching sample records and does not duplicate enrollments. Use it only in development or a disposable test environment.
+
+### Troubleshooting native startup
+
+When a project has been moved between directories or cloned under a different macOS account, Swift can retain stale build/module-cache paths. Rebuild the Swift package artifacts without touching PostgreSQL data:
+
+```bash
+swift package clean
+swift package resolve
+swift build
+Scripts/migrate.sh
+Scripts/start.sh
+```
+
+If startup reports that the port is occupied, set a free `PORT` in `.env` and use the matching API URL in the iOS Debug build settings. If `/health` returns 503, verify PostgreSQL is accepting connections and that the database and role named in `.env` exist.
 
 ## Docker Compose
 
@@ -127,6 +141,8 @@ Fluent tracks migrations in its migration table. The historical `FixCascadeDelet
 ```bash
 swift test
 ```
+
+GitHub Actions runs the same Swift build/test and native migration, administrator creation, server startup, health and authenticated CRUD flow on a macOS runner, in addition to the Linux PostgreSQL/Docker pipeline.
 
 The integration suite requires a real PostgreSQL test database. Set the same DATABASE_* variables to a dedicated disposable test database before running tests. Never point tests at production data. Coverage includes protected routes, token expiry and revocation, athlete/coach/class/attendance CRUD, validation, class capacity, concurrent enrollment attempts, attendance uniqueness, transactional dependent-record deletion, reports and analytics.
 

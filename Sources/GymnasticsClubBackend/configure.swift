@@ -13,6 +13,11 @@ public func configure(_ app: Application) async throws {
         throw Abort(.internalServerError, reason: "Database configuration incomplete. Set DATABASE_HOST, DATABASE_PORT, DATABASE_NAME, DATABASE_USERNAME and DATABASE_PASSWORD.")
     }
 
+    guard let tokenTTL = Int(Environment.get("AUTH_TOKEN_TTL_SECONDS") ?? "43200"),
+          (900...86400).contains(tokenTTL) else {
+        throw Abort(.internalServerError, reason: "AUTH_TOKEN_TTL_SECONDS must be an integer between 900 and 86400.")
+    }
+
     let defaultTLS = app.environment == .production ? "require" : "prefer"
     let tlsMode = Environment.get("DATABASE_TLS")?.lowercased() ?? defaultTLS
     guard ["disable", "prefer", "require"].contains(tlsMode) else {
