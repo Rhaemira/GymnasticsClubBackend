@@ -36,8 +36,15 @@ func routes(_ app: Application) throws {
         await loginRateLimiter.reset(accountKey)
         let ttl = Int(Environment.get("AUTH_TOKEN_TTL_SECONDS") ?? "43200") ?? 43200
         guard (900...86400).contains(ttl) else { throw Abort(.internalServerError, reason: "AUTH_TOKEN_TTL_SECONDS must be between 900 and 86400.") }
+        let now = Date()
+        // Tokens are opaque and expire within 24 hours. Opportunistically
+        // remove expired digests during login so the session table stays bounded.
+        try await AccessToken.query(on: req.db)
+            .filter(\.$expiresAt <= now)
+            .delete()
+
         let rawToken = SecureAccessToken.generate()
-        let expiresAt = Date().addingTimeInterval(TimeInterval(ttl))
+        let expiresAt = now.addingTimeInterval(TimeInterval(ttl))
         try await AccessToken(userID: user.requireID(), tokenHash: SecureAccessToken.digest(rawToken), expiresAt: expiresAt).save(on: req.db)
         return LoginResponse(token: rawToken, expiresAt: expiresAt, user: AdminUserResponse(id: try user.requireID(), email: user.email))
     }

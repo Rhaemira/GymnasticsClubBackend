@@ -120,7 +120,7 @@ Never commit .env files. Production must use a secret manager or deployment envi
 
 All athlete, coach, class, enrollment, attendance, dashboard, reports and analytics routes require `Authorization: Bearer <token>`.
 
-Login returns a random opaque token once. The database stores only its SHA-256 digest; passwords are stored using bcrypt. Login failures are rate-limited per remote address/email pair in the current process. Deploy multiple instances behind a shared rate limiter before scaling horizontally.
+Login returns a random opaque token once. The database stores only its SHA-256 digest; passwords are stored using bcrypt. Login failures are rate-limited per remote address/email pair in the current process, and the in-memory tracking table is bounded and pruned. This protects a single process; deploy multiple instances behind a shared edge rate limiter before scaling horizontally. Expired access-token digests are opportunistically cleaned up during login.
 
 Example:
 

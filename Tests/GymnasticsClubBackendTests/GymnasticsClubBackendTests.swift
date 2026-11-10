@@ -595,3 +595,36 @@ extension GymnasticsClubBackendTests {
         }
     }
 }
+
+
+extension GymnasticsClubBackendTests {
+    @Test("Login throttling limits repeated failures and recovers after its window")
+    func loginRateLimiterEnforcesWindow() async {
+        let limiter = LoginRateLimiter()
+        let key = "test-account"
+        let start = Date(timeIntervalSince1970: 1_000)
+
+        for attempt in 0..<5 {
+            #expect(await limiter.isAllowed(key, now: start.addingTimeInterval(TimeInterval(attempt))))
+            await limiter.recordFailure(key, now: start.addingTimeInterval(TimeInterval(attempt)))
+        }
+
+        #expect(!(await limiter.isAllowed(key, now: start.addingTimeInterval(30))))
+        #expect(await limiter.isAllowed(key, now: start.addingTimeInterval(61)))
+    }
+
+    @Test("Successful login resets that limiter key")
+    func loginRateLimiterResetsAfterSuccess() async {
+        let limiter = LoginRateLimiter()
+        let key = "test-reset"
+        let now = Date(timeIntervalSince1970: 2_000)
+
+        for attempt in 0..<5 {
+            await limiter.recordFailure(key, now: now.addingTimeInterval(TimeInterval(attempt)))
+        }
+
+        #expect(!(await limiter.isAllowed(key, now: now.addingTimeInterval(10))))
+        await limiter.reset(key)
+        #expect(await limiter.isAllowed(key, now: now.addingTimeInterval(10)))
+    }
+}
