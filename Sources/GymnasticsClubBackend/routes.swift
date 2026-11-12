@@ -55,7 +55,10 @@ func routes(_ app: Application) throws {
         // Tokens are opaque and expire within 24 hours. Opportunistically
         // remove expired digests during login so the session table stays bounded.
         try await AccessToken.query(on: req.db)
-            .filter(\.$expiresAt <= now)
+            .group(.or) { group in
+                group.filter(\.$expiresAt <= now)
+                group.filter(\.$revokedAt != nil)
+            }
             .delete()
 
         let rawToken = SecureAccessToken.generate()
