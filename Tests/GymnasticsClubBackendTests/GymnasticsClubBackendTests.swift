@@ -782,3 +782,43 @@ extension GymnasticsClubBackendTests {
         }
     }
 }
+
+
+extension GymnasticsClubBackendTests {
+    @Test("Successful login for one account does not clear source IP failures")
+    func successfulLoginDoesNotResetIPThrottle() async throws {
+        try await withApp { app in
+            for _ in 0..<4 {
+                try await app.testing().test(.POST, "/auth/login", beforeRequest: { request in
+                    try request.content.encode(LoginRequest(email: "other-account@example.test", password: "incorrect-password"))
+                }, afterResponse: { response async in
+                    #expect(response.status == .unauthorized)
+                })
+            }
+
+            let administrator = AdminUser(
+                email: "known-account@example.test",
+                passwordHash: try Bcrypt.hash("correct-horse-battery-staple")
+            )
+            try await administrator.save(on: app.db)
+
+            try await app.testing().test(.POST, "/auth/login", beforeRequest: { request in
+                try request.content.encode(LoginRequest(email: "known-account@example.test", password: "correct-horse-battery-staple"))
+            }, afterResponse: { response async in
+                #expect(response.status == .ok)
+            })
+
+            try await app.testing().test(.POST, "/auth/login", beforeRequest: { request in
+                try request.content.encode(LoginRequest(email: "third-account@example.test", password: "incorrect-password"))
+            }, afterResponse: { response async in
+                #expect(response.status == .unauthorized)
+            })
+
+            try await app.testing().test(.POST, "/auth/login", beforeRequest: { request in
+                try request.content.encode(LoginRequest(email: "fourth-account@example.test", password: "incorrect-password"))
+            }, afterResponse: { response async in
+                #expect(response.status == .tooManyRequests)
+            })
+        }
+    }
+}
