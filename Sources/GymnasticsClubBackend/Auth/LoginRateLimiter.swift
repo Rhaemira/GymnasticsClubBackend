@@ -1,8 +1,9 @@
 import Foundation
+import Vapor
 
 /// Process-local failed-login throttle. Tracking is bounded so attempts using
 /// many distinct account identifiers cannot grow this dictionary indefinitely.
-/// Multi-instance deployments must put a shared limiter at the edge.
+/// Multi-instance deployments must use a shared limiter at the edge.
 actor LoginRateLimiter {
     private var failures: [String: [Date]] = [:]
     private let limit = 5
@@ -63,4 +64,6 @@ actor LoginRateLimiter {
     }
 }
 
-let loginRateLimiter = LoginRateLimiter()
+struct LoginRateLimiterKey: StorageKey {
+    typealias Value = LoginRateLimiter
+}
