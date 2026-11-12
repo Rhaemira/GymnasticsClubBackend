@@ -106,9 +106,8 @@ All database settings are required by the application at startup:
 | DATABASE_TLS | `disable`, `prefer`, or `require` |
 | AUTH_TOKEN_TTL_SECONDS | Token lifetime, 900–86400 seconds |
 | PORT | Native startup script port |
-| LOG_LEVEL | Vapor log level |
 
-Never commit .env files. Production must use a secret manager or deployment environment, a unique database role/password, and `DATABASE_TLS=require`. The Compose stack uses an unpublished PostgreSQL service on its isolated Docker network; its explicit `DATABASE_TLS_ALLOW_PRIVATE_COMPOSE_LINK` exception is scoped to the service hostname `db`. Do not enable that exception for an externally reachable database.
+Server logging is intentionally capped at `info`; SQL bind parameters and other debug diagnostics are not emitted. Never commit .env files. Production must use a secret manager or deployment environment, a unique database role/password, and `DATABASE_TLS=require`. The Compose stack uses an unpublished PostgreSQL service on its isolated Docker network; its explicit `DATABASE_TLS_ALLOW_PRIVATE_COMPOSE_LINK` exception is scoped to the service hostname `db`. Do not enable that exception for an externally reachable database.
 
 ## Authentication and API
 
