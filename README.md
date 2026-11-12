@@ -1,152 +1,194 @@
-# Gymnastics Club Backend
+# Gymnastics Club — Backend
 
-Swift 6 / Vapor 4 API for the Gymnastics Club iOS application. PostgreSQL is the source of truth; all management routes require an administrator bearer token.
+[![Backend CI](https://github.com/Rhaemira/GymnasticsClubBackend/actions/workflows/backend.yml/badge.svg?branch=main)](https://github.com/Rhaemira/GymnasticsClubBackend/actions/workflows/backend.yml)
+[![Swift](https://img.shields.io/badge/Swift-6-orange)](#)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%2B-4169E1)](#)
+[![Docker](https://img.shields.io/badge/Docker-Compose-2496ED)](#)
+
+A Swift 6 / Vapor 4 REST API for the Gymnastics Club iOS application. PostgreSQL is the source of truth. Administrative management endpoints require a bearer token.
+
+> **Project status:** Active engineering work. Check the current branch's CI results before treating a build or deployment as release-ready.
+
+## Capabilities
+
+- **Authentication** — administrator login, bcrypt password hashing, opaque bearer tokens, token revocation and expiry.
+- **Authorization** — protected management, reporting, and analytics endpoints.
+- **Club operations** — athletes, coaches, classes, enrollments, attendance, dashboard, reports, and analytics.
+- **Data integrity** — additive migrations, attendance uniqueness, class-capacity bounds, enrollment-capacity enforcement, and transactional operations.
+- **Operational readiness** — health endpoint, native scripts, Docker Compose, PostgreSQL persistence, and CI smoke tests.
+- **Defensive validation** — normalized inputs, canonical athlete levels, and bounded login throttling.
+
+## Architecture
+
+```mermaid
+flowchart TD
+  Client[iOS app / API client] --> Routes[Vapor routes]
+  Routes --> Auth[Authentication and middleware]
+  Routes --> Validation[Request validation and DTOs]
+  Auth --> Services[Domain operations]
+  Validation --> Services
+  Services --> Models[Fluent models]
+  Models --> DB[(PostgreSQL)]
+  Migrations[Fluent migrations] --> DB
+```
+
+| Area | Responsibility |
+|---|---|
+| `Auth/` | Login throttling and token utilities |
+| `Middleware/` | Bearer-token authentication and security headers |
+| `Commands/` | Administrative CLI commands |
+| `DTOs/` | Request and response contracts |
+| `Models/` | Fluent persistence models |
+| `Migrations/` | Schema creation and additive integrity constraints |
+| `Validation/` | Shared request validation |
+| `routes.swift` | HTTP route registration and handlers |
+| `configure.swift` | Database, middleware, migrations, and app configuration |
+| `Scripts/` | Native setup, migration, startup, and admin creation |
 
 ## Requirements
 
-- Swift 6.0 or newer (the Docker image uses Swift 6.1)
-- PostgreSQL 14+ for native development, or Docker Desktop with Compose v2
-- macOS 13+ for native development
+- Swift 6.0 or newer (CI currently uses Swift 6.1)
+- PostgreSQL 14+ for native development
+- Docker Desktop with Docker Compose v2 for containerized development
 
-## Native macOS setup
+## Quick start
 
-From the repository root:
+### Option A — Docker Compose
 
 ```bash
 cp .env.example .env
 # Edit .env and set a unique local DATABASE_PASSWORD.
+docker compose up --build -d
+docker compose ps
+curl --fail http://127.0.0.1:8080/health
+```
+
+Compose starts PostgreSQL, waits for readiness, applies migrations, and then starts the API. The database uses a named volume. Ordinary shutdown preserves database data:
+
+```bash
+docker compose down
+```
+
+**Do not use `docker compose down -v` on a database whose data you want to keep.** PostgreSQL is not published to the host by default; the API binds to localhost by default. Put the API behind a TLS-terminating reverse proxy for remote access.
+
+### Option B — Native macOS
+
+```bash
+cp .env.example .env
+# Edit .env with local PostgreSQL connection details and a unique password.
 Scripts/setup.sh
 ```
 
-Create the local database and user using your PostgreSQL installation (the example names below match .env):
+Create the local role and database using names matching `.env`:
 
 ```bash
 createuser -P gymnastics_dev
 createdb -O gymnastics_dev gymnastics_club
 ```
 
-Then:
+Then migrate and start:
 
 ```bash
 Scripts/migrate.sh
 Scripts/start.sh
+curl --fail http://127.0.0.1:8080/health
 ```
 
-The startup script verifies PostgreSQL readiness and checks that the configured API port is available before launching Vapor. It listens on `0.0.0.0:8080` by default so a physical iPhone on the same trusted development network can reach the Mac. Override `PORT` in `.env` to use another port. Verify database readiness:
+The startup script checks PostgreSQL readiness and port availability. By default, native startup binds to `0.0.0.0:8080` for trusted local-network development. Restrict access appropriately and use HTTPS for production.
 
-```bash
-curl -i http://127.0.0.1:8080/health
-```
+## Create the first administrator
 
-Expected response: HTTP 200 with `{"status":"ok","database":"ready"}`. If PostgreSQL is unreachable or the schema is not migrated, health returns HTTP 503.
-
-### Initial administrator
-
-With the server stopped, or in a second terminal, run:
+There is no public administrator-registration endpoint. Create the initial administrator using the interactive script:
 
 ```bash
 Scripts/create-admin.sh
 ```
 
-The script prompts for the administrator email and password without echoing the password. Administrator passwords must contain at least 12 characters and no more than 72 UTF-8 bytes (the bcrypt input limit). There is no public administrator-registration route.
+The password is prompted without echo. Passwords must contain at least 12 characters and no more than 72 UTF-8 bytes (the bcrypt input limit).
 
-### Seed data
-
-```bash
-set -a; source .env; set +a
-swift run GymnasticsClubBackend seed
-```
-
-The seed command is idempotent: it reuses matching sample records and does not duplicate enrollments. Use it only in development or a disposable test environment.
-
-### Troubleshooting native startup
-
-When a project has been moved between directories or cloned under a different macOS account, Swift can retain stale build/module-cache paths. Rebuild the Swift package artifacts without touching PostgreSQL data:
-
-```bash
-swift package clean
-swift package resolve
-swift build
-Scripts/migrate.sh
-Scripts/start.sh
-```
-
-If startup reports that the port is occupied, set a free `PORT` in `.env` and use the matching API URL in the iOS Debug build settings. If `/health` returns 503, verify PostgreSQL is accepting connections and that the database and role named in `.env` exist.
-
-## Docker Compose
-
-Copy .env.example to .env and set DATABASE_PASSWORD. Start the complete stack:
-
-```bash
-docker compose up --build -d
-docker compose ps
-curl -i http://127.0.0.1:8080/health
-docker compose logs -f app
-```
-
-Compose waits for PostgreSQL health, runs the one-shot migration service, and only then starts the API. PostgreSQL data is stored in the named `db_data` volume. Ordinary shutdown preserves data:
-
-```bash
-docker compose down
-```
-
-Do not use `docker compose down -v` on a database containing data. The database port is not published by default. The API is bound to localhost by default; put it behind a TLS-terminating reverse proxy for remote access.
+For automation or CI, the command supports environment-provided credentials; use temporary credentials and ensure logs are masked. Never reuse CI credentials in a real environment.
 
 ## Configuration
 
-All database settings are required by the application at startup:
+Copy `.env.example` to `.env`. The application requires database configuration at startup.
 
 | Variable | Purpose |
 |---|---|
-| DATABASE_HOST | PostgreSQL hostname |
-| DATABASE_PORT | PostgreSQL port |
-| DATABASE_NAME | Database name |
-| DATABASE_USERNAME | Database role |
-| DATABASE_PASSWORD | Database password |
-| DATABASE_TLS | `disable`, `prefer`, or `require` |
-| AUTH_TOKEN_TTL_SECONDS | Token lifetime, 900–86400 seconds |
-| PORT | Native startup script port |
+| `DATABASE_HOST` | PostgreSQL hostname |
+| `DATABASE_PORT` | PostgreSQL port |
+| `DATABASE_NAME` | Database name |
+| `DATABASE_USERNAME` | Database role |
+| `DATABASE_PASSWORD` | Database password |
+| `DATABASE_TLS` | `disable`, `prefer`, or `require` |
+| `AUTH_TOKEN_TTL_SECONDS` | Token lifetime (900–86400 seconds) |
+| `PORT` | HTTP port used by native startup |
 
-Server logging is intentionally capped at `info`; SQL bind parameters and other debug diagnostics are not emitted. Never commit .env files. Production must use a secret manager or deployment environment, a unique database role/password, and `DATABASE_TLS=require`. The Compose stack uses an unpublished PostgreSQL service on its isolated Docker network; its explicit `DATABASE_TLS_ALLOW_PRIVATE_COMPOSE_LINK` exception is scoped to the service hostname `db`. Do not enable that exception for an externally reachable database.
+For production, use a secret manager, a dedicated database role, strong unique credentials, and `DATABASE_TLS=require`. Never commit `.env` or place secrets in command history, screenshots, or logs. The Compose-only private-link TLS exception is scoped to its internal database service; do not use it for an external database.
 
-## Authentication and API
+## API overview
 
-- `POST /auth/login` — public; JSON `{"email":"...","password":"..."}`
-- `GET /auth/me` — bearer token required
-- `POST /auth/logout` — bearer token required; revokes the presented token
-- `GET /health` — public database readiness probe
-- `GET /` — public service identity
+| Area | Routes | Access |
+|---|---|---|
+| Health | `GET /health` | Public |
+| Service identity | `GET /` | Public |
+| Authentication | `POST /auth/login` | Public |
+| Current session | `GET /auth/me` | Bearer token |
+| Logout / revoke | `POST /auth/logout` | Bearer token |
+| Club management | `/athletes`, `/coaches`, `/classes`, `/enrollments`, `/attendance` | Bearer token |
+| Insights | dashboard, reports, analytics routes | Bearer token |
 
-All athlete, coach, class, enrollment, attendance, dashboard, reports and analytics routes require `Authorization: Bearer <token>`.
+See [API_CONTRACT.md](API_CONTRACT.md) for payload shapes and client integration details. The health endpoint reports database readiness; it is not a substitute for monitoring, alerting, or an authenticated application-level check.
 
-Login returns a random opaque token once. The database stores only its SHA-256 digest; passwords are stored using bcrypt. Login failures are rate-limited per remote address and normalized email in an application-instance-scoped in-memory limiter. The tracker is bounded and pruned; a successful login clears only that account's failure history, not the source address's history. This is a single-instance defense, not a distributed security boundary: deploy multiple instances behind a shared edge rate limiter and configure trusted-proxy address handling before scaling horizontally. Unknown accounts receive a bcrypt-cost operation to reduce account-enumeration timing differences. Expired and revoked access-token digests are opportunistically cleaned up during successful login.
+## Security model and operational limits
 
-Example:
+- Passwords are stored with bcrypt; raw passwords are never stored.
+- Login returns a random opaque token once. Only its SHA-256 digest is stored in PostgreSQL.
+- Expired and revoked token digests are opportunistically cleaned during successful login.
+- Login failures are throttled by remote address and normalized email using a bounded, pruned in-memory limiter.
+- The current limiter is **per application instance**. It is not a distributed security boundary. Before horizontal scaling, deploy shared edge rate limiting and configure trusted-proxy address handling.
+- Forwarded headers must be stripped from untrusted clients and set by the trusted reverse proxy.
+- Server logging is intentionally capped at `info` to avoid emitting SQL bind parameters and sensitive diagnostics.
+
+## Database and migration safety
+
+Migrations are tracked by Fluent. Existing migration files are retained; schema evolution should use additive migrations. The historical `FixCascadeDeletes` migration is intentionally not registered because it drops and recreates populated tables. **Do not execute it.**
+
+The attendance uniqueness migration does not silently delete historical duplicates. If duplicates are found, it aborts so they can be reviewed and resolved through an explicit, audited maintenance operation.
+
+## Tests and CI
+
+Run the integration suite against a dedicated disposable PostgreSQL database:
 
 ```bash
-curl -sS -X POST http://127.0.0.1:8080/auth/login \
-  -H 'Content-Type: application/json' \
-  -d '{"email":"admin@example.com","password":"your-password"}'
-```
-
-Use the returned token in subsequent API calls. Never put tokens in URLs or logs.
-
-## Database migrations
-
-Fluent tracks migrations in its migration table. The historical `FixCascadeDeletes` migration drops and recreates populated tables and is deliberately not registered. Do not execute it. Existing migration files are retained unchanged. New schema changes use additive migrations.
-
-## Tests
-
-```bash
+swift package resolve
+swift build
 swift test
 ```
 
-GitHub Actions runs the same Swift build/test and native migration, administrator creation, server startup, health and authenticated CRUD flow on a macOS runner, in addition to the Linux PostgreSQL/Docker pipeline.
+Never point integration tests at production data. The GitHub Actions pipeline includes:
 
-The integration suite requires a real PostgreSQL test database. Set the same DATABASE_* variables to a dedicated disposable test database before running tests. Never point tests at production data. Coverage includes protected routes, token expiry and revocation, login throttling, athlete/coach/class/attendance CRUD, validation, class capacity and concurrent enrollment, attendance uniqueness under concurrent inserts, fractional and whole-second date coding, transactional dependent-record deletion, reports and analytics.
+- Linux Swift build and PostgreSQL integration tests
+- Native macOS migration, administrator creation, server startup, health, and authenticated API smoke tests
+- Docker Compose startup, health/authenticated API checks, and database-volume persistence verification
 
-The attendance uniqueness migration is additive. It never removes historical records. If it detects duplicate historical attendance rows, it aborts with a clear error rather than silently discarding data. Review those rows and resolve them through an explicit, audited data-maintenance operation before retrying.
+A green CI run verifies the configured automated checks; it does not by itself certify a production deployment.
 
-## Production deployment
+## Deployment checklist
 
-Terminate HTTPS at a trusted reverse proxy/load balancer. Configure it to strip untrusted incoming forwarding headers and add its own forwarding metadata. Restrict network access to PostgreSQL, inject secrets from a secret manager, run migrations as a deployment step, and monitor `/health` plus application logs. Do not expose the database publicly.
+- [ ] Configure HTTPS and a trusted reverse proxy.
+- [ ] Strip untrusted forwarding headers and set trusted proxy metadata.
+- [ ] Inject secrets from a secret manager; use a dedicated database role.
+- [ ] Set `DATABASE_TLS=require` for external PostgreSQL.
+- [ ] Restrict database network access.
+- [ ] Run migrations as a controlled deployment step.
+- [ ] Configure shared rate limiting before running multiple app instances.
+- [ ] Monitor health, logs, database capacity, and authentication failures.
+- [ ] Back up PostgreSQL and test restore procedures.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Report security issues privately according to [SECURITY.md](SECURITY.md).
+
+## Related project
+
+- [GymnasticsClubApp](https://github.com/Rhaemira/GymnasticsClubApp) — native SwiftUI iOS client.
