@@ -9,6 +9,45 @@ enum RequestValidation {
         return cleaned
     }
 
+    static func login(_ input: LoginRequest) throws -> String {
+        let email = input.email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let parts = email.split(separator: "@", omittingEmptySubsequences: false)
+        guard email.utf8.count <= 254,
+              parts.count == 2,
+              !parts[0].isEmpty,
+              parts[0].utf8.count <= 64,
+              !parts[1].isEmpty,
+              !email.contains(where: \.isWhitespace),
+              !email.contains(where: { "<>()[],:;\\"".contains($0) }) else {
+            throw Abort(.badRequest, reason: "Enter a valid email address.")
+        }
+
+        let labels = parts[1].split(separator: ".", omittingEmptySubsequences: false)
+        guard labels.count >= 2,
+              labels.allSatisfy({ label in
+                  !label.isEmpty &&
+                  label.utf8.count <= 63 &&
+                  label.first != "-" &&
+                  label.last != "-" &&
+                  label.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-") })
+              }) else {
+            throw Abort(.badRequest, reason: "Enter a valid email address.")
+        }
+
+        guard !input.password.isEmpty, input.password.utf8.count <= 72 else {
+            throw Abort(.badRequest, reason: "Password must contain between 1 and 72 UTF-8 bytes.")
+        }
+        return email
+    }
+
+    static func administrator(email rawEmail: String, password: String) throws -> String {
+        let email = try login(LoginRequest(email: rawEmail, password: password))
+        guard password.count >= 12 else {
+            throw Abort(.badRequest, reason: "Administrator passwords must contain at least 12 characters.")
+        }
+        return email
+    }
+
     static func athlete(_ input: WriteAthleteDTO) throws {
         _ = try name(input.fullName, field: "Athlete name")
         guard (1...120).contains(input.age) else {
