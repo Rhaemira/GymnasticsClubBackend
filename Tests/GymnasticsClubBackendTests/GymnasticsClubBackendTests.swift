@@ -606,34 +606,103 @@ extension GymnasticsClubBackendTests {
 
 
 extension GymnasticsClubBackendTests {
-    @Test("Login throttling limits repeated failures and recovers after its window")
+    @Test("Login throttling reserves attempts atomically and recovers after its window")
     func loginRateLimiterEnforcesWindow() async {
         let limiter = LoginRateLimiter()
-        let key = "test-account"
+        let keys = ["ip:127.0.0.1", "account:test@example.test"]
         let start = Date(timeIntervalSince1970: 1_000)
 
         for attempt in 0..<5 {
-            #expect(await limiter.isAllowed(key, now: start.addingTimeInterval(TimeInterval(attempt))))
-            await limiter.recordFailure(key, now: start.addingTimeInterval(TimeInterval(attempt)))
+            let reservation = await limiter.beginAttempt(
+                for: keys,
+                now: start.addingTimeInterval(TimeInterval(attempt))
+            )
+            #expect(reservation != nil)
+            if let reservation {
+                await limiter.recordFailure(
+                    reservation,
+                    for: keys,
+                    now: start.addingTimeInterval(TimeInterval(attempt))
+                )
+            }
         }
 
-        #expect(!(await limiter.isAllowed(key, now: start.addingTimeInterval(30))))
-        #expect(await limiter.isAllowed(key, now: start.addingTimeInterval(61)))
+        #expect(await limiter.beginAttempt(for: keys, now: start.addingTimeInterval(30)) == nil)
+        #expect(await limiter.beginAttempt(for: keys, now: start.addingTimeInterval(61)) != nil)
     }
 
-    @Test("Successful login resets that limiter key")
-    func loginRateLimiterResetsAfterSuccess() async {
+    @Test("Concurrent login reservations cannot exceed the configured attempt limit")
+    func loginRateLimiterReservesConcurrentAttempts() async {
         let limiter = LoginRateLimiter()
-        let key = "test-reset"
-        let now = Date(timeIntervalSince1970: 2_000)
+        let keys = ["ip:127.0.0.1", "account:parallel@example.test"]
+        let now = Date(timeIntervalSince1970: 3_000)
 
-        for attempt in 0..<5 {
-            await limiter.recordFailure(key, now: now.addingTimeInterval(TimeInterval(attempt)))
+        let reservations = await withTaskGroup(of: UUID?.self) { group in
+            for _ in 0..<12 {
+                group.addTask {
+                    await limiter.beginAttempt(for: keys, now: now)
+                }
+            }
+            var accepted: [UUID] = []
+            for await reservation in group {
+                if let reservation { accepted.append(reservation) }
+            }
+            return accepted
         }
 
-        #expect(!(await limiter.isAllowed(key, now: now.addingTimeInterval(10))))
-        await limiter.reset(key)
-        #expect(await limiter.isAllowed(key, now: now.addingTimeInterval(10)))
+        #expect(reservations.count == 5)
+        for reservation in reservations {
+            await limiter.recordFailure(reservation, for: keys, now: now)
+        }
+        #expect(await limiter.beginAttempt(for: keys, now: now.addingTimeInterval(1)) == nil)
+    }
+
+    @Test("Successful login resets account failures but preserves source IP failures")
+    func loginRateLimiterResetsOnlyAccountAfterSuccess() async {
+        let limiter = LoginRateLimiter()
+        let accountKey = "account:reset@example.test"
+        let ipKey = "ip:192.0.2.10"
+        let keys = [accountKey, ipKey]
+        let now = Date(timeIntervalSince1970: 4_000)
+
+        for attempt in 0..<4 {
+            let reservation = await limiter.beginAttempt(for: keys, now: now.addingTimeInterval(TimeInterval(attempt)))
+            #expect(reservation != nil)
+            if let reservation {
+                await limiter.recordFailure(reservation, for: keys, now: now.addingTimeInterval(TimeInterval(attempt)))
+            }
+        }
+
+        let successfulAttempt = await limiter.beginAttempt(for: keys, now: now.addingTimeInterval(5))
+        #expect(successfulAttempt != nil)
+        if let successfulAttempt {
+            await limiter.recordSuccess(successfulAttempt, accountKey: accountKey, for: keys)
+        }
+
+        let otherAccount = "account:other@example.test"
+        let ipFailure = await limiter.beginAttempt(for: [otherAccount, ipKey], now: now.addingTimeInterval(6))
+        #expect(ipFailure != nil)
+        if let ipFailure {
+            await limiter.recordFailure(ipFailure, for: [otherAccount, ipKey], now: now.addingTimeInterval(6))
+        }
+
+        #expect(await limiter.beginAttempt(for: [accountKey, "ip:192.0.2.11"], now: now.addingTimeInterval(7)) != nil)
+        #expect(await limiter.beginAttempt(for: [otherAccount, ipKey], now: now.addingTimeInterval(7)) == nil)
+    }
+
+    @Test("Cancelled login attempts release their in-flight reservation")
+    func loginRateLimiterCancelsReservations() async {
+        let limiter = LoginRateLimiter()
+        let keys = ["ip:127.0.0.1", "account:cancel@example.test"]
+        let now = Date(timeIntervalSince1970: 5_000)
+
+        let reservation = await limiter.beginAttempt(for: keys, now: now)
+        #expect(reservation != nil)
+        if let reservation {
+            await limiter.cancelAttempt(reservation, for: keys)
+        }
+
+        #expect(await limiter.beginAttempt(for: keys, now: now) != nil)
     }
 }
 

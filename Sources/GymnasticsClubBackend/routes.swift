@@ -25,46 +25,61 @@ func routes(_ app: Application) throws {
         }
         let ipKey = "ip:\(req.remoteAddress?.ipAddress ?? "unknown")"
         let accountKey = "account:\(email)"
-        guard await loginRateLimiter.isAllowed(ipKey), await loginRateLimiter.isAllowed(accountKey) else {
+        let rateLimitKeys = [ipKey, accountKey]
+        guard let attemptID = await loginRateLimiter.beginAttempt(for: rateLimitKeys) else {
             throw Abort(.tooManyRequests, reason: "Too many login attempts. Try again later.")
         }
 
-        // Perform a bcrypt operation even when the account does not exist so
-        // unknown emails do not get a cheap, easily distinguishable response.
-        let user = try await AdminUser.query(on: req.db).filter(\.$email == email).first()
-        let passwordMatches: Bool
-        if let user {
-            passwordMatches = try Bcrypt.verify(input.password, created: user.passwordHash)
-        } else {
-            _ = try Bcrypt.hash(input.password)
-            passwordMatches = false
-        }
-
-        guard let user, passwordMatches else {
-            await loginRateLimiter.recordFailure(ipKey)
-            await loginRateLimiter.recordFailure(accountKey)
-            throw Abort(.unauthorized, reason: "Email or password is incorrect.")
-        }
-
-        // A successful login resets only that account's failures. It must not
-        // erase failures accumulated by other accounts from the same source IP.
-        await loginRateLimiter.reset(accountKey)
-        let ttl = Int(Environment.get("AUTH_TOKEN_TTL_SECONDS") ?? "43200") ?? 43200
-        guard (900...86400).contains(ttl) else { throw Abort(.internalServerError, reason: "AUTH_TOKEN_TTL_SECONDS must be between 900 and 86400.") }
-        let now = Date()
-        // Tokens are opaque and expire within 24 hours. Opportunistically
-        // remove expired digests during login so the session table stays bounded.
-        try await AccessToken.query(on: req.db)
-            .group(.or) { group in
-                group.filter(\.$expiresAt <= now)
-                group.filter(\.$revokedAt != nil)
+        do {
+            // Perform a bcrypt operation even when the account does not exist so
+            // unknown emails do not get a cheap, easily distinguishable response.
+            let user = try await AdminUser.query(on: req.db).filter(\.$email == email).first()
+            let passwordMatches: Bool
+            if let user {
+                passwordMatches = try Bcrypt.verify(input.password, created: user.passwordHash)
+            } else {
+                _ = try Bcrypt.hash(input.password)
+                passwordMatches = false
             }
-            .delete()
 
-        let rawToken = SecureAccessToken.generate()
-        let expiresAt = now.addingTimeInterval(TimeInterval(ttl))
-        try await AccessToken(userID: user.requireID(), tokenHash: SecureAccessToken.digest(rawToken), expiresAt: expiresAt).save(on: req.db)
-        return LoginResponse(token: rawToken, expiresAt: expiresAt, user: AdminUserResponse(id: try user.requireID(), email: user.email))
+            guard let user, passwordMatches else {
+                await loginRateLimiter.recordFailure(attemptID, for: rateLimitKeys)
+                throw Abort(.unauthorized, reason: "Email or password is incorrect.")
+            }
+
+            // Reset only this account's failures; preserve failures from other
+            // accounts sharing the same source IP.
+            await loginRateLimiter.recordSuccess(attemptID, accountKey: accountKey, for: rateLimitKeys)
+            let ttl = Int(Environment.get("AUTH_TOKEN_TTL_SECONDS") ?? "43200") ?? 43200
+            guard (900...86400).contains(ttl) else {
+                throw Abort(.internalServerError, reason: "AUTH_TOKEN_TTL_SECONDS must be between 900 and 86400.")
+            }
+            let now = Date()
+            // Tokens are opaque and expire within 24 hours. Opportunistically
+            // remove expired digests during login so the session table stays bounded.
+            try await AccessToken.query(on: req.db)
+                .group(.or) { group in
+                    group.filter(\.$expiresAt <= now)
+                    group.filter(\.$revokedAt != nil)
+                }
+                .delete()
+
+            let rawToken = SecureAccessToken.generate()
+            let expiresAt = now.addingTimeInterval(TimeInterval(ttl))
+            try await AccessToken(
+                userID: user.requireID(),
+                tokenHash: SecureAccessToken.digest(rawToken),
+                expiresAt: expiresAt
+            ).save(on: req.db)
+            return LoginResponse(
+                token: rawToken,
+                expiresAt: expiresAt,
+                user: AdminUserResponse(id: try user.requireID(), email: user.email)
+            )
+        } catch {
+            await loginRateLimiter.cancelAttempt(attemptID, for: rateLimitKeys)
+            throw error
+        }
     }
 
     protected.get("auth", "me") { req async throws -> AdminUserResponse in
