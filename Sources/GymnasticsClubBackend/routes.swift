@@ -12,7 +12,7 @@ func routes(_ app: Application) throws {
             _ = try await Coach.query(on: req.db).count()
             return Response(status: .ok, headers: ["Content-Type": "application/json"], body: .init(string: #"{"status":"ok","database":"ready"}"#))
         } catch {
-            req.logger.error("Health check database query failed: \(error.localizedDescription)")
+            req.logger.error("Health check database query failed.")
             return Response(status: .serviceUnavailable, headers: ["Content-Type": "application/json"], body: .init(string: #"{"status":"unavailable","database":"unavailable"}"#))
         }
     }
