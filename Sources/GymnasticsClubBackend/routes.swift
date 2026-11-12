@@ -19,20 +19,35 @@ func routes(_ app: Application) throws {
 
     app.post("auth", "login") { req async throws -> LoginResponse in
         let input = try req.content.decode(LoginRequest.self)
-        let email = input.email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !email.isEmpty, !input.password.isEmpty else { throw Abort(.badRequest, reason: "Email and password are required.") }
+        let email = try RequestValidation.login(input)
+        guard let loginRateLimiter = req.application.storage[LoginRateLimiterKey.self] else {
+            throw Abort(.internalServerError, reason: "Login protection is unavailable.")
+        }
         let ipKey = "ip:\(req.remoteAddress?.ipAddress ?? "unknown")"
         let accountKey = "account:\(email)"
         guard await loginRateLimiter.isAllowed(ipKey), await loginRateLimiter.isAllowed(accountKey) else {
             throw Abort(.tooManyRequests, reason: "Too many login attempts. Try again later.")
         }
-        guard let user = try await AdminUser.query(on: req.db).filter(\.$email == email).first(),
-              try Bcrypt.verify(input.password, created: user.passwordHash) else {
+
+        // Perform a bcrypt operation even when the account does not exist so
+        // unknown emails do not get a cheap, easily distinguishable response.
+        let user = try await AdminUser.query(on: req.db).filter(\.$email == email).first()
+        let passwordMatches: Bool
+        if let user {
+            passwordMatches = try Bcrypt.verify(input.password, created: user.passwordHash)
+        } else {
+            _ = try Bcrypt.hash(input.password)
+            passwordMatches = false
+        }
+
+        guard let user, passwordMatches else {
             await loginRateLimiter.recordFailure(ipKey)
             await loginRateLimiter.recordFailure(accountKey)
             throw Abort(.unauthorized, reason: "Email or password is incorrect.")
         }
-        await loginRateLimiter.reset(ipKey)
+
+        // A successful login resets only that account's failures. It must not
+        // erase failures accumulated by other accounts from the same source IP.
         await loginRateLimiter.reset(accountKey)
         let ttl = Int(Environment.get("AUTH_TOKEN_TTL_SECONDS") ?? "43200") ?? 43200
         guard (900...86400).contains(ttl) else { throw Abort(.internalServerError, reason: "AUTH_TOKEN_TTL_SECONDS must be between 900 and 86400.") }
