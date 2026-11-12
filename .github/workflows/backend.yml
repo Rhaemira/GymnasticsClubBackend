@@ -101,7 +101,10 @@ jobs:
         run: |
           set -euo pipefail
           Scripts/migrate.sh
-          ADMIN_EMAIL=ci-native-admin@example.test ADMIN_INITIAL_PASSWORD=ci-native-password-123 swift run GymnasticsClubBackend create-admin
+          ADMIN_EMAIL=ci-native-admin@example.test
+          ADMIN_PASSWORD="$(openssl rand -hex 24)"
+          echo "::add-mask::$ADMIN_PASSWORD"
+          ADMIN_EMAIL="$ADMIN_EMAIL" ADMIN_INITIAL_PASSWORD="$ADMIN_PASSWORD" swift run GymnasticsClubBackend create-admin
           Scripts/start.sh > "$RUNNER_TEMP/gymnastics-vapor.log" 2>&1 &
           SERVER_PID=$!
           trap 'kill "$SERVER_PID" 2>/dev/null || true; wait "$SERVER_PID" 2>/dev/null || true' EXIT
@@ -113,7 +116,9 @@ jobs:
           done
           python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["status"] == "ok" and d["database"] == "ready"' "$RUNNER_TEMP/health.json"
 
-          TOKEN="$(curl --fail --silent -X POST http://127.0.0.1:8080/auth/login -H 'Content-Type: application/json' -d '{"email":"ci-native-admin@example.test","password":"ci-native-password-123"}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')"
+          LOGIN_BODY="$(python3 -c 'import json,sys; print(json.dumps({"email":sys.argv[1],"password":sys.argv[2]}))' "$ADMIN_EMAIL" "$ADMIN_PASSWORD")"
+          TOKEN="$(curl --fail --silent -X POST http://127.0.0.1:8080/auth/login -H 'Content-Type: application/json' --data "$LOGIN_BODY" | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')"
+          echo "::add-mask::$TOKEN"
           curl --fail --silent -X POST http://127.0.0.1:8080/athletes -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"fullName":"Native CI Athlete","age":12,"level":"Beginner"}' >/dev/null
           curl --fail --silent http://127.0.0.1:8080/athletes -H "Authorization: Bearer $TOKEN" | python3 -c 'import json,sys; rows=json.load(sys.stdin); assert len(rows) == 1 and rows[0]["fullName"] == "Native CI Athlete"'
       - name: Stop local PostgreSQL
