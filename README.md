@@ -48,7 +48,7 @@ With the server stopped, or in a second terminal, run:
 Scripts/create-admin.sh
 ```
 
-The script prompts for the administrator email and password without echoing the password. Passwords must be at least 12 characters. There is no public administrator-registration route.
+The script prompts for the administrator email and password without echoing the password. Administrator passwords must contain at least 12 characters and no more than 72 UTF-8 bytes (the bcrypt input limit). There is no public administrator-registration route.
 
 ### Seed data
 
@@ -119,7 +119,7 @@ Server logging is intentionally capped at `info`; SQL bind parameters and other 
 
 All athlete, coach, class, enrollment, attendance, dashboard, reports and analytics routes require `Authorization: Bearer <token>`.
 
-Login returns a random opaque token once. The database stores only its SHA-256 digest; passwords are stored using bcrypt. Login failures are rate-limited per remote address/email pair in the current process, and the in-memory tracking table is bounded and pruned. This protects a single process; deploy multiple instances behind a shared edge rate limiter before scaling horizontally. Expired access-token digests are opportunistically cleaned up during login.
+Login returns a random opaque token once. The database stores only its SHA-256 digest; passwords are stored using bcrypt. Login failures are rate-limited per remote address and normalized email in an application-instance-scoped in-memory limiter. The tracker is bounded and pruned; a successful login clears only that account's failure history, not the source address's history. This is a single-instance defense, not a distributed security boundary: deploy multiple instances behind a shared edge rate limiter and configure trusted-proxy address handling before scaling horizontally. Unknown accounts receive a bcrypt-cost operation to reduce account-enumeration timing differences. Expired and revoked access-token digests are opportunistically cleaned up during successful login.
 
 Example:
 
