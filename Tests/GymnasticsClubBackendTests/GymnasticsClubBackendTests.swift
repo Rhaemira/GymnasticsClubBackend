@@ -822,3 +822,43 @@ extension GymnasticsClubBackendTests {
         }
     }
 }
+
+
+extension GymnasticsClubBackendTests {
+    @Test("A successful login prunes expired and revoked bearer-token records")
+    func loginPrunesInactiveTokens() async throws {
+        try await withApp { app in
+            let administrator = AdminUser(
+                email: "token-cleanup@example.test",
+                passwordHash: try Bcrypt.hash("correct-horse-battery-staple")
+            )
+            try await administrator.save(on: app.db)
+            let userID = try administrator.requireID()
+
+            try await AccessToken(
+                userID: userID,
+                tokenHash: SecureAccessToken.digest("expired-token"),
+                expiresAt: Date(timeIntervalSince1970: 1)
+            ).save(on: app.db)
+
+            let revoked = AccessToken(
+                userID: userID,
+                tokenHash: SecureAccessToken.digest("revoked-token"),
+                expiresAt: .distantFuture
+            )
+            revoked.revokedAt = .now
+            try await revoked.save(on: app.db)
+
+            try await app.testing().test(.POST, "/auth/login", beforeRequest: { request in
+                try request.content.encode(LoginRequest(
+                    email: "token-cleanup@example.test",
+                    password: "correct-horse-battery-staple"
+                ))
+            }, afterResponse: { response async in
+                #expect(response.status == .ok)
+            })
+
+            #expect(try await AccessToken.query(on: app.db).count() == 1)
+        }
+    }
+}
