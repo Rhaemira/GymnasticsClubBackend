@@ -29,7 +29,6 @@ services:
       DATABASE_TLS: ${DATABASE_TLS:-disable}
       DATABASE_TLS_ALLOW_PRIVATE_COMPOSE_LINK: "true"
       AUTH_TOKEN_TTL_SECONDS: ${AUTH_TOKEN_TTL_SECONDS:-43200}
-      LOG_LEVEL: ${LOG_LEVEL:-info}
     depends_on:
       db:
         condition: service_healthy
