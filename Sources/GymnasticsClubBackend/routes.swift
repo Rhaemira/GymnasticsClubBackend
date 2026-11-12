@@ -631,11 +631,11 @@ func routes(_ app: Application) throws {
         let athleteLevels =
 
             Dictionary(
-
                 grouping: athletes,
-
-                by: \.level
-
+                by: { athlete in
+                    (try? RequestValidation.athleteLevel(athlete.level))
+                        ?? athlete.level.trimmingCharacters(in: .whitespacesAndNewlines)
+                }
             )
 
             .map {
