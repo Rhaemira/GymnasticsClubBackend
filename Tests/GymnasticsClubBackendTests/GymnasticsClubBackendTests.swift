@@ -888,3 +888,14 @@ extension GymnasticsClubBackendTests {
         }
     }
 }
+
+
+extension GymnasticsClubBackendTests {
+    @Test("Athlete levels are stored using canonical display values")
+    func athleteLevelsAreCanonicalized() throws {
+        #expect(try RequestValidation.athleteLevel(" beginner ") == "Beginner")
+        #expect(try RequestValidation.athleteLevel("INTERMEDIATE") == "Intermediate")
+        #expect(try RequestValidation.athleteLevel("Advanced") == "Advanced")
+        #expect(try RequestValidation.athleteLevel("elite") == "Elite")
+    }
+}
