@@ -15,27 +15,29 @@ struct CreateAdminCommand: AsyncCommand {
 
     func run(using context: CommandContext, signature: Signature) async throws {
         guard
-            let email = Environment.get("ADMIN_EMAIL")?.trimmingCharacters(in: .whitespacesAndNewlines),
-            let password = Environment.get("ADMIN_INITIAL_PASSWORD"),
-            !email.isEmpty,
-            password.count >= 12
+            let rawEmail = Environment.get("ADMIN_EMAIL"),
+            let password = Environment.get("ADMIN_INITIAL_PASSWORD")
         else {
-            throw Abort(
-                .badRequest,
-                reason: "Set ADMIN_EMAIL and ADMIN_INITIAL_PASSWORD (at least 12 characters)."
-            )
+            throw Abort(.badRequest, reason: "Set ADMIN_EMAIL and ADMIN_INITIAL_PASSWORD.")
         }
 
-        let normalized = email.lowercased()
+        let normalized = try RequestValidation.administrator(email: rawEmail, password: password)
         if try await AdminUser.query(on: context.application.db)
             .filter(\.$email == normalized)
             .first() != nil {
             throw Abort(.conflict, reason: "An administrator with that email already exists.")
         }
 
-        let passwordHash = try Bcrypt.hash(password)
-        let administrator = AdminUser(email: normalized, passwordHash: passwordHash)
-        try await administrator.save(on: context.application.db)
+        let administrator = AdminUser(email: normalized, passwordHash: try Bcrypt.hash(password))
+        do {
+            try await administrator.save(on: context.application.db)
+        } catch {
+            let details = String(reflecting: error).lowercased()
+            if details.contains("23505") || details.contains("unique constraint") {
+                throw Abort(.conflict, reason: "An administrator with that email already exists.")
+            }
+            throw error
+        }
         context.console.print("Administrator created.")
     }
 }
