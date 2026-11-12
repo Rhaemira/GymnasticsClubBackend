@@ -1,8 +1,8 @@
 # Gymnastics Club — Backend
 
-[![Backend CI](https://github.com/Rhaemira/GymnasticsClubBackend/actions/workflows/backend.yml/badge.svg?branch=main)](https://github.com/Rhaemira/GymnasticsClubBackend/actions/workflows/backend.yml)
+[![Backend CI](https://github.com/Rhaemira/GymnasticsClubBackend/actions/workflows/backend.yml/badge.svg?branch=engineering%2Fsecure-integrated-overhaul)](https://github.com/Rhaemira/GymnasticsClubBackend/actions/workflows/backend.yml)
 [![Swift](https://img.shields.io/badge/Swift-6-orange)](#)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%2B-4169E1)](#)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-14%2B-4169E1)](#)
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED)](#)
 
 A Swift 6 / Vapor 4 REST API for the Gymnastics Club iOS application. PostgreSQL is the source of truth. Administrative management endpoints require a bearer token.
