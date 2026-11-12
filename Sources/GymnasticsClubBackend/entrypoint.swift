@@ -10,6 +10,10 @@ enum Entrypoint {
         try LoggingSystem.bootstrap(from: &env)
         
         let app = try await Application.make(env)
+        // SQL statement and bind-value diagnostics are debug-level logs. Keep
+        // the application and Fluent logger at info by default so passwords,
+        // token digests and personal data cannot leak through query logging.
+        app.logger.logLevel = .info
 
         // This attempts to install NIO as the Swift Concurrency global executor.
         // You can enable it if you'd like to reduce the amount of context switching between NIO and Swift Concurrency.

@@ -1,0 +1,186 @@
+name: Backend CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: gymnastics_test
+          POSTGRES_USER: gymnastics_test
+          POSTGRES_PASSWORD: test-only-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U gymnastics_test -d gymnastics_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      DATABASE_HOST: 127.0.0.1
+      DATABASE_PORT: "5432"
+      DATABASE_NAME: gymnastics_test
+      DATABASE_USERNAME: gymnastics_test
+      DATABASE_PASSWORD: test-only-password
+      DATABASE_TLS: disable
+      AUTH_TOKEN_TTL_SECONDS: "3600"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.1"
+      - name: Resolve dependencies
+        run: swift package resolve
+      - name: Build
+        run: swift build
+      - name: Run PostgreSQL integration tests
+        run: swift test
+
+  native-macos:
+    runs-on: macos-26
+    env:
+      DATABASE_HOST: 127.0.0.1
+      DATABASE_PORT: "5432"
+      DATABASE_NAME: gymnastics_native_test
+      DATABASE_USERNAME: gymnastics_native_test
+      DATABASE_PASSWORD: ci-native-only-password
+      DATABASE_TLS: disable
+      AUTH_TOKEN_TTL_SECONDS: "3600"
+      PORT: "8080"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use the Swift toolchain bundled with the selected Xcode
+        run: |
+          xcode-select -p
+          swift --version
+      - name: Start an isolated local PostgreSQL instance
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew install postgresql@16
+          PG_BIN="$(brew --prefix postgresql@16)/bin"
+          PGDATA="$RUNNER_TEMP/gymnastics-postgres"
+          mkdir -p "$PGDATA"
+          "$PG_BIN/initdb" -D "$PGDATA" --username="$DATABASE_USERNAME" --auth=trust
+          "$PG_BIN/pg_ctl" -D "$PGDATA" -l "$RUNNER_TEMP/postgres.log" -o "-h 127.0.0.1 -p $DATABASE_PORT" start
+          "$PG_BIN/createdb" -h 127.0.0.1 -p "$DATABASE_PORT" -U "$DATABASE_USERNAME" "$DATABASE_NAME"
+      - name: Configure native environment and resolve dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > .env <<EOF
+          DATABASE_HOST=$DATABASE_HOST
+          DATABASE_PORT=$DATABASE_PORT
+          DATABASE_NAME=$DATABASE_NAME
+          DATABASE_USERNAME=$DATABASE_USERNAME
+          DATABASE_PASSWORD=$DATABASE_PASSWORD
+          DATABASE_TLS=$DATABASE_TLS
+          AUTH_TOKEN_TTL_SECONDS=$AUTH_TOKEN_TTL_SECONDS
+          PORT=$PORT
+          LOG_LEVEL=info
+          EOF
+          chmod 600 .env
+          bash -n Scripts/*.sh
+          Scripts/setup.sh
+      - name: Build and run PostgreSQL integration tests
+        run: |
+          swift build
+          swift test
+      - name: Exercise native migration, administrator and server startup
+        shell: bash
+        run: |
+          set -euo pipefail
+          Scripts/migrate.sh
+          ADMIN_EMAIL=ci-native-admin@example.test
+          ADMIN_PASSWORD="$(openssl rand -hex 24)"
+          echo "::add-mask::$ADMIN_PASSWORD"
+          ADMIN_EMAIL="$ADMIN_EMAIL" ADMIN_INITIAL_PASSWORD="$ADMIN_PASSWORD" swift run GymnasticsClubBackend create-admin
+          Scripts/start.sh > "$RUNNER_TEMP/gymnastics-vapor.log" 2>&1 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true; wait "$SERVER_PID" 2>/dev/null || true' EXIT
+
+          for attempt in {1..60}; do
+            if curl --fail --silent http://127.0.0.1:8080/health > "$RUNNER_TEMP/health.json"; then break; fi
+            if [[ "$attempt" == 60 ]]; then cat "$RUNNER_TEMP/gymnastics-vapor.log"; exit 1; fi
+            sleep 1
+          done
+          python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["status"] == "ok" and d["database"] == "ready"' "$RUNNER_TEMP/health.json"
+
+          LOGIN_BODY="$(python3 -c 'import json,sys; print(json.dumps({"email":sys.argv[1],"password":sys.argv[2]}))' "$ADMIN_EMAIL" "$ADMIN_PASSWORD")"
+          TOKEN="$(curl --fail --silent -X POST http://127.0.0.1:8080/auth/login -H 'Content-Type: application/json' --data "$LOGIN_BODY" | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')"
+          echo "::add-mask::$TOKEN"
+          curl --fail --silent -X POST http://127.0.0.1:8080/athletes -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"fullName":"Native CI Athlete","age":12,"level":"Beginner"}' >/dev/null
+          curl --fail --silent http://127.0.0.1:8080/athletes -H "Authorization: Bearer $TOKEN" | python3 -c 'import json,sys; rows=json.load(sys.stdin); assert len(rows) == 1 and rows[0]["fullName"] == "Native CI Athlete"'
+      - name: Stop local PostgreSQL
+        if: always()
+        shell: bash
+        run: |
+          if command -v brew >/dev/null 2>&1; then
+            PG_BIN="$(brew --prefix postgresql@16 2>/dev/null)/bin"
+            if [[ -x "$PG_BIN/pg_ctl" && -d "$RUNNER_TEMP/gymnastics-postgres" ]]; then
+              "$PG_BIN/pg_ctl" -D "$RUNNER_TEMP/gymnastics-postgres" stop -m fast || true
+            fi
+          fi
+
+  docker-smoke:
+    runs-on: ubuntu-24.04
+    env:
+      DATABASE_PASSWORD: ci-only-password
+      DATABASE_NAME: gymnastics_club
+      DATABASE_USERNAME: gymnastics_dev
+      APP_BIND_ADDRESS: 127.0.0.1
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare Compose environment
+        run: cp .env.example .env
+      - name: Build and start PostgreSQL, migrations and Vapor
+        run: docker compose up --build -d
+      - name: Verify health and authenticated API
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in {1..60}; do
+            if curl --fail --silent http://127.0.0.1:8080/health >/dev/null; then break; fi
+            if [[ "$attempt" == 60 ]]; then docker compose logs; exit 1; fi
+            sleep 2
+          done
+          ADMIN_PASSWORD="$(openssl rand -hex 24)"
+          echo "::add-mask::$ADMIN_PASSWORD"
+          docker compose run --rm -e ADMIN_EMAIL=ci-admin@example.test -e ADMIN_INITIAL_PASSWORD="$ADMIN_PASSWORD" app create-admin
+          LOGIN_BODY="$(jq -n --arg email "ci-admin@example.test" --arg password "$ADMIN_PASSWORD" '{email:$email,password:$password}')"
+          TOKEN="$(curl --fail --silent -X POST http://127.0.0.1:8080/auth/login -H 'Content-Type: application/json' --data "$LOGIN_BODY" | jq -r .token)"
+          test -n "$TOKEN"
+          echo "::add-mask::$TOKEN"
+          echo "CI_BEARER_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+          curl --fail --silent -X POST http://127.0.0.1:8080/athletes -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"fullName":"CI Athlete","age":12,"level":"Beginner"}' >/dev/null
+          curl --fail --silent http://127.0.0.1:8080/athletes -H "Authorization: Bearer $TOKEN" | jq -e 'length == 1'
+      - name: Verify database volume survives service restarts
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker compose restart db
+          for attempt in {1..60}; do
+            if docker compose exec -T db pg_isready -U "$DATABASE_USERNAME" -d "$DATABASE_NAME" >/dev/null; then break; fi
+            if [[ "$attempt" == 60 ]]; then docker compose logs db; exit 1; fi
+            sleep 2
+          done
+          docker compose restart app
+          for attempt in {1..60}; do
+            if curl --fail --silent http://127.0.0.1:8080/health >/dev/null; then break; fi
+            if [[ "$attempt" == 60 ]]; then docker compose logs app; exit 1; fi
+            sleep 2
+          done
+          curl --fail --silent http://127.0.0.1:8080/athletes -H "Authorization: Bearer $CI_BEARER_TOKEN" | jq -e 'length == 1'
+      - name: Preserve cleanup
+        if: always()
+        run: docker compose down
