@@ -20,6 +20,12 @@ This document is the shared contract for the SwiftUI client and the Swift/Vapor 
 | GET | `/health` | — | `{ "status": "ok", "database": "ready" }` | 503 when DB is unavailable |
 | POST | `/auth/login` | `{ "email": string, "password": string }` | `LoginResponse` | 400 invalid input; 401 invalid credentials; 429 throttled |
 
+Login input rules:
+- Email is trimmed and normalized to lowercase; malformed addresses are rejected with 400.
+- Password input must be 1–72 UTF-8 bytes to match bcrypt's input limit. Initial administrator creation additionally requires at least 12 characters.
+- Failed logins are limited to five per remote address and normalized email in a rolling 60-second window per running application instance. Multi-instance deployments require a shared edge limiter.
+- Unknown accounts receive a bcrypt-cost operation to reduce email-enumeration timing differences.
+
 Login response:
 
 ```json
@@ -86,7 +92,7 @@ Login response:
 ```
 
 - Class name: 2–100 non-whitespace characters.
-- Capacity: 1–500.
+- Capacity: 1–500; PostgreSQL enforces this range and prevents lowering capacity below existing enrollments. The additive migration aborts if historical data violates the invariant; it never deletes or rewrites enrollments.
 - `coach_id` is deliberate and must not be changed to `coachID`.
 
 ### Enrollment
