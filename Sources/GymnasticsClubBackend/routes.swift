@@ -160,7 +160,7 @@ func routes(_ app: Application) throws {
         let athlete = Athlete(
             fullName: try RequestValidation.name(input.fullName, field: "Athlete name"),
             age: input.age,
-            level: input.level.trimmingCharacters(in: .whitespacesAndNewlines)
+            level: try RequestValidation.athleteLevel(input.level)
         )
         try await athlete.save(on: req.db)
 
@@ -741,7 +741,7 @@ func routes(_ app: Application) throws {
         try RequestValidation.athlete(update)
         athlete.fullName = try RequestValidation.name(update.fullName, field: "Athlete name")
         athlete.age = update.age
-        athlete.level = update.level.trimmingCharacters(in: .whitespacesAndNewlines)
+        athlete.level = try RequestValidation.athleteLevel(update.level)
 
         try await athlete.save(
             on: req.db
