@@ -862,3 +862,29 @@ extension GymnasticsClubBackendTests {
         }
     }
 }
+
+
+extension GymnasticsClubBackendTests {
+    @Test("Database capacity constraint rejects values outside the supported range")
+    func databaseEnforcesClassCapacityRange() async throws {
+        try await withApp { app in
+            let coach = Coach(fullName: "Capacity Range Coach", specialty: "Artistic")
+            try await coach.save(on: app.db)
+            let gymClass = Class(name: "Capacity Range Class", capacity: 1, coachID: try coach.requireID())
+            try await gymClass.save(on: app.db)
+            let classID = try gymClass.requireID()
+
+            gymClass.capacity = 0
+            var rejected = false
+            do {
+                try await gymClass.save(on: app.db)
+            } catch {
+                rejected = true
+            }
+
+            #expect(rejected)
+            let persisted = try await Class.find(classID, on: app.db)
+            #expect(persisted?.capacity == 1)
+        }
+    }
+}
