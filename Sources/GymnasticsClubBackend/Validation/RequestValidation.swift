@@ -17,8 +17,11 @@ enum RequestValidation {
               !parts[0].isEmpty,
               parts[0].utf8.count <= 64,
               !parts[1].isEmpty,
+              !parts[0].hasPrefix("."),
+              !parts[0].hasSuffix("."),
+              !parts[0].contains(".."),
               !email.contains(where: \.isWhitespace),
-              !email.contains(where: { "<>()[],:;\\"".contains($0) }) else {
+              parts[0].allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || ".!#$%&'*+/=?^_`{|}~-".contains($0)) }) else {
             throw Abort(.badRequest, reason: "Enter a valid email address.")
         }
 
