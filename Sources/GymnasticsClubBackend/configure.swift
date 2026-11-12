@@ -67,5 +67,6 @@ public func configure(_ app: Application) async throws {
     app.asyncCommands.use(SeedData(), as: "seed")
     app.asyncCommands.use(CreateAdminCommand(), as: "create-admin")
     app.middleware.use(SecurityHeadersMiddleware())
+    app.storage[LoginRateLimiterKey.self] = LoginRateLimiter()
     try routes(app)
 }
