@@ -2,46 +2,12 @@ import Fluent
 import Vapor
 import SQLKit
 
-/// PostgreSQL row locking serializes all enrollments for a given class and
-/// database constraints protect the capacity invariant from non-HTTP writers.
+/// PostgreSQL row locking serializes all enrollments for a given class.
 struct EnforceEnrollmentCapacity: AsyncMigration {
     func prepare(on database: any Database) async throws {
         guard let sql = database as? any SQLDatabase else {
             throw Abort(.internalServerError, reason: "Enrollment capacity migration requires PostgreSQL.")
         }
-
-        // Fail safely when historical rows violate the invariant. Never delete
-        // enrollments or silently rewrite a class's configured capacity.
-        try await sql.raw("""
-            DO $$
-            BEGIN
-                IF EXISTS (
-                    SELECT 1 FROM classes WHERE capacity NOT BETWEEN 1 AND 500
-                ) THEN
-                    RAISE EXCEPTION
-                        'class_capacity_range_invalid: existing classes have capacity outside 1...500; review them before applying this migration';
-                END IF;
-
-                IF EXISTS (
-                    SELECT c.id
-                    FROM classes c
-                    LEFT JOIN enrollments e ON e.class_id = c.id
-                    GROUP BY c.id, c.capacity
-                    HAVING COUNT(e.id) > c.capacity
-                ) THEN
-                    RAISE EXCEPTION
-                        'class_capacity_below_enrollment: existing classes exceed their configured capacity; reconcile enrollment data before applying this migration';
-                END IF;
-            END
-            $$;
-            """).run()
-
-        try await sql.raw("""
-            ALTER TABLE classes
-            ADD CONSTRAINT classes_capacity_range
-            CHECK (capacity BETWEEN 1 AND 500);
-            """).run()
-
         try await sql.raw("""
             CREATE OR REPLACE FUNCTION gymnastics_check_class_capacity()
             RETURNS trigger AS $$
@@ -94,6 +60,5 @@ struct EnforceEnrollmentCapacity: AsyncMigration {
         try await sql.raw("DROP TRIGGER IF EXISTS gymnastics_enrollment_capacity ON enrollments;").run()
         try await sql.raw("DROP TRIGGER IF EXISTS gymnastics_class_capacity_update ON classes;").run()
         try await sql.raw("DROP FUNCTION IF EXISTS gymnastics_check_class_capacity();").run()
-        try await sql.raw("ALTER TABLE classes DROP CONSTRAINT IF EXISTS classes_capacity_range;").run()
     }
 }
