@@ -11,7 +11,6 @@ actor LoginRateLimiter {
     private let maximumTrackedKeys = 10_000
 
     func isAllowed(_ key: String, now: Date = .now) -> Bool {
-        pruneExpired(now: now)
         let recent = recentFailures(for: key, now: now)
         if recent.isEmpty {
             failures.removeValue(forKey: key)
@@ -22,7 +21,6 @@ actor LoginRateLimiter {
     }
 
     func recordFailure(_ key: String, now: Date = .now) {
-        pruneExpired(now: now)
         var recent = recentFailures(for: key, now: now)
         guard recent.count < limit else { return }
 
@@ -42,17 +40,6 @@ actor LoginRateLimiter {
         (failures[key] ?? []).filter {
             let age = now.timeIntervalSince($0)
             return age >= 0 && age < window
-        }
-    }
-
-    private func pruneExpired(now: Date) {
-        for key in Array(failures.keys) {
-            let recent = recentFailures(for: key, now: now)
-            if recent.isEmpty {
-                failures.removeValue(forKey: key)
-            } else {
-                failures[key] = recent
-            }
         }
     }
 
