@@ -56,8 +56,16 @@ enum RequestValidation {
         guard (1...120).contains(input.age) else {
             throw Abort(.badRequest, reason: "Athlete age must be between 1 and 120.")
         }
-        let allowed = ["beginner", "intermediate", "advanced", "elite"]
-        guard allowed.contains(input.level.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()) else {
+        _ = try athleteLevel(input.level)
+    }
+
+    static func athleteLevel(_ value: String) throws -> String {
+        switch value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "beginner": return "Beginner"
+        case "intermediate": return "Intermediate"
+        case "advanced": return "Advanced"
+        case "elite": return "Elite"
+        default:
             throw Abort(.badRequest, reason: "Athlete level must be Beginner, Intermediate, Advanced, or Elite.")
         }
     }
