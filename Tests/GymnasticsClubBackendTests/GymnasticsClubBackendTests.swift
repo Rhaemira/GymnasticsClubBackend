@@ -743,3 +743,42 @@ extension GymnasticsClubBackendTests {
         }
     }
 }
+
+
+extension GymnasticsClubBackendTests {
+    @Test("Login rejects malformed emails and passwords beyond bcrypt's byte limit")
+    func loginValidatesCredentialBounds() async throws {
+        try await withApp { app in
+            try await app.testing().test(.POST, "/auth/login", beforeRequest: { request in
+                try request.content.encode(LoginRequest(email: "not-an-email", password: "long-enough-password"))
+            }, afterResponse: { response async in
+                #expect(response.status == .badRequest)
+            })
+
+            try await app.testing().test(.POST, "/auth/login", beforeRequest: { request in
+                try request.content.encode(LoginRequest(email: "bounded@example.test", password: String(repeating: "x", count: 73)))
+            }, afterResponse: { response async in
+                #expect(response.status == .badRequest)
+            })
+        }
+    }
+
+    @Test("Login throttles repeated failures within the application instance")
+    func loginRateLimitsRepeatedFailures() async throws {
+        try await withApp { app in
+            for _ in 0..<5 {
+                try await app.testing().test(.POST, "/auth/login", beforeRequest: { request in
+                    try request.content.encode(LoginRequest(email: "rate-limit@example.test", password: "incorrect-password"))
+                }, afterResponse: { response async in
+                    #expect(response.status == .unauthorized)
+                })
+            }
+
+            try await app.testing().test(.POST, "/auth/login", beforeRequest: { request in
+                try request.content.encode(LoginRequest(email: "rate-limit@example.test", password: "incorrect-password"))
+            }, afterResponse: { response async in
+                #expect(response.status == .tooManyRequests)
+            })
+        }
+    }
+}
