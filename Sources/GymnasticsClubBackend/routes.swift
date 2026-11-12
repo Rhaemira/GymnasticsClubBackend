@@ -628,27 +628,26 @@ func routes(_ app: Application) throws {
         let classes =
             try await Class.query(on: req.db)
                 .all()
-        let athleteLevels =
-
-            Dictionary(
-                grouping: athletes,
-                by: { athlete in
-                    (try? RequestValidation.athleteLevel(athlete.level))
-                        ?? athlete.level.trimmingCharacters(in: .whitespacesAndNewlines)
-                }
-            )
-
-            .map {
-
-                LevelResponse(
-
-                    level: $0.key,
-
-                    count: $0.value.count
-
-                )
-
+        let canonicalLevelOrder = [
+            "Beginner": 0,
+            "Intermediate": 1,
+            "Advanced": 2,
+            "Elite": 3
+        ]
+        let athleteLevels = Dictionary(
+            grouping: athletes,
+            by: { athlete in
+                (try? RequestValidation.athleteLevel(athlete.level))
+                    ?? athlete.level.trimmingCharacters(in: .whitespacesAndNewlines)
             }
+        )
+        .map { LevelResponse(level: $0.key, count: $0.value.count) }
+        .sorted { left, right in
+            let leftRank = canonicalLevelOrder[left.level] ?? Int.max
+            let rightRank = canonicalLevelOrder[right.level] ?? Int.max
+            if leftRank != rightRank { return leftRank < rightRank }
+            return left.level.localizedStandardCompare(right.level) == .orderedAscending
+        }
         
         let coachWorkload =
 

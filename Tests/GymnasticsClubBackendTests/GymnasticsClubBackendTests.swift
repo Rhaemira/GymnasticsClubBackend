@@ -345,15 +345,17 @@ extension GymnasticsClubBackendTests {
             })
             // Historical records may contain mixed-case or padded levels.
             // Analytics should group those under the canonical display value.
-            try await Athlete(fullName: "Legacy Level Athlete", age: 12, level: " advanced ").save(on: app.db)
+            try await Athlete(fullName: "Legacy Advanced Athlete", age: 12, level: " advanced ").save(on: app.db)
+            try await Athlete(fullName: "Legacy Beginner Athlete", age: 11, level: "beginner").save(on: app.db)
+            try await Athlete(fullName: "Legacy Elite Athlete", age: 13, level: "ELITE").save(on: app.db)
 
             try await app.testing().test(.GET, "/analytics", beforeRequest: { request in
                 request.headers.add(name: "Authorization", value: "Bearer \(token)")
             }, afterResponse: { response async throws in
                 #expect(response.status == .ok)
                 let analytics = try response.content.decode(AnalyticsResponse.self)
-                #expect(analytics.athleteLevels.map(\.level) == ["Advanced"])
-                #expect(analytics.athleteLevels.map(\.count) == [1])
+                #expect(analytics.athleteLevels.map(\.level) == ["Beginner", "Advanced", "Elite"])
+                #expect(analytics.athleteLevels.map(\.count) == [1, 1, 1])
             })
         }
     }
