@@ -94,7 +94,7 @@ Scripts/start.sh
 curl --fail http://127.0.0.1:8080/health
 ```
 
-The startup script checks PostgreSQL readiness and port availability. By default, native startup binds to `0.0.0.0:8080` for trusted local-network development. Restrict access appropriately and use HTTPS for production.
+The startup script checks PostgreSQL readiness and port availability. Native startup binds to `127.0.0.1:8080` by default. For physical-device testing on a trusted LAN, temporarily set `BIND_ADDRESS=0.0.0.0` in `.env`, then restore localhost-only binding afterward.
 
 ## Create the first administrator
 
@@ -121,7 +121,7 @@ Copy `.env.example` to `.env`. The application requires database configuration a
 | `DATABASE_PASSWORD` | Database password |
 | `DATABASE_TLS` | `disable`, `prefer`, or `require` |
 | `AUTH_TOKEN_TTL_SECONDS` | Token lifetime (900–86400 seconds) |
-| `PORT` | HTTP port used by native startup |
+| `PORT` | HTTP port used by native startup |\n| `BIND_ADDRESS` | Native bind address (defaults to `127.0.0.1`) |\n| `TRUSTED_PROXY_IPS` | Comma-separated immediate proxy IPs permitted to set `X-Real-IP` |
 
 For production, use a secret manager, a dedicated database role, strong unique credentials, and `DATABASE_TLS=require`. Never commit `.env` or place secrets in command history, screenshots, or logs. The Compose-only private-link TLS exception is scoped to its internal database service; do not use it for an external database.
 
@@ -144,9 +144,9 @@ See [API_CONTRACT.md](API_CONTRACT.md) for payload shapes and client integration
 - Passwords are stored with bcrypt; raw passwords are never stored.
 - Login returns a random opaque token once. Only its SHA-256 digest is stored in PostgreSQL.
 - Expired and revoked token digests are opportunistically cleaned during successful login.
-- Login failures are throttled by remote address and normalized email using a bounded, pruned in-memory limiter.
+- Login failures are throttled by normalized email and resolved client address using a bounded, pruned in-memory limiter.\n- `X-Real-IP` is honored only when the direct TCP peer matches an exact address in `TRUSTED_PROXY_IPS`; the trusted proxy must overwrite this header.
 - The current limiter is **per application instance**. It is not a distributed security boundary. Before horizontal scaling, deploy shared edge rate limiting and configure trusted-proxy address handling.
-- Forwarded headers must be stripped from untrusted clients and set by the trusted reverse proxy.
+- Do not trust arbitrary `X-Forwarded-For` or `X-Real-IP` values. Restrict `TRUSTED_PROXY_IPS` to actual immediate proxy addresses and configure the proxy to overwrite `X-Real-IP`. If proxy addresses are dynamic, keep proxy identity disabled and enforce rate limits at the trusted edge.
 - Server logging is intentionally capped at `info` to avoid emitting SQL bind parameters and sensitive diagnostics.
 
 ## Database and migration safety
@@ -176,12 +176,12 @@ A green CI run verifies the configured automated checks; it does not by itself c
 ## Deployment checklist
 
 - [ ] Configure HTTPS and a trusted reverse proxy.
-- [ ] Strip untrusted forwarding headers and set trusted proxy metadata.
+- [ ] Allowlist immediate reverse-proxy IPs in `TRUSTED_PROXY_IPS` and configure the proxy to overwrite `X-Real-IP`.
 - [ ] Inject secrets from a secret manager; use a dedicated database role.
 - [ ] Set `DATABASE_TLS=require` for external PostgreSQL.
 - [ ] Restrict database network access.
 - [ ] Run migrations as a controlled deployment step.
-- [ ] Configure shared rate limiting before running multiple app instances.
+- [ ] Configure shared edge rate limiting before running multiple app instances; the in-process limiter is only a per-instance secondary control.
 - [ ] Monitor health, logs, database capacity, and authentication failures.
 - [ ] Back up PostgreSQL and test restore procedures.
 
