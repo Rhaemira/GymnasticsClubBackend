@@ -13,6 +13,7 @@ set +a
 : "${DATABASE_USERNAME:?Missing DATABASE_USERNAME}"
 : "${DATABASE_PASSWORD:?Missing DATABASE_PASSWORD}"
 PORT="${PORT:-8080}"
+BIND_ADDRESS="${BIND_ADDRESS:-127.0.0.1}"
 
 if command -v pg_isready >/dev/null 2>&1; then
     pg_isready -h "$DATABASE_HOST" -p "$DATABASE_PORT" -U "$DATABASE_USERNAME" -d "$DATABASE_NAME" >/dev/null || {
@@ -27,5 +28,5 @@ if command -v lsof >/dev/null 2>&1 && lsof -nP -iTCP:"$PORT" -sTCP:LISTEN -t >/d
     exit 1
 fi
 
-echo "Starting Gymnastics Club API on 0.0.0.0:$PORT."
-exec swift run GymnasticsClubBackend serve --hostname 0.0.0.0 --port "$PORT"
+echo "Starting Gymnastics Club API on $BIND_ADDRESS:$PORT."
+exec swift run GymnasticsClubBackend serve --hostname "$BIND_ADDRESS" --port "$PORT"
