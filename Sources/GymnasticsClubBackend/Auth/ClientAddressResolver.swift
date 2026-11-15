@@ -1,4 +1,9 @@
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 
 /// Resolves the address used by the process-local login throttle.
 /// Forwarded identity is accepted only from an explicitly trusted immediate
@@ -13,19 +18,15 @@ enum ClientAddressResolver {
     }
 
     static func isIPAddress(_ value: String) -> Bool {
-        let address = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !address.isEmpty, address == value else { return false }
-        if address.contains(".") && !address.contains(":") {
-            let octets = address.split(separator: ".", omittingEmptySubsequences: false)
-            return octets.count == 4 && octets.allSatisfy { octet in
-                guard !octet.isEmpty, octet.count <= 3, octet.allSatisfy({ $0 >= "0" && $0 <= "9" }),
-                      let number = Int(octet) else { return false }
-                return (0...255).contains(number)
-            }
+        guard !value.isEmpty,
+              value == value.trimmingCharacters(in: .whitespacesAndNewlines) else { return false }
+
+        var ipv4 = in_addr()
+        if value.withCString({ inet_pton(AF_INET, $0, &ipv4) }) == 1 {
+            return true
         }
-        if address.contains(":") {
-            return address.filter { $0 == ":" }.count >= 2 && address.allSatisfy { $0.isHexDigit || $0 == ":" || $0 == "." }
-        }
-        return false
+
+        var ipv6 = in6_addr()
+        return value.withCString({ inet_pton(AF_INET6, $0, &ipv6) }) == 1
     }
 }
