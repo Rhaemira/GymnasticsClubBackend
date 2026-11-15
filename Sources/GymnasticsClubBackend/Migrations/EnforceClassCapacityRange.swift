@@ -34,10 +34,22 @@ struct EnforceClassCapacityRange: AsyncMigration {
             $$;
             """).run()
 
+        // Guard constraint creation so a retry after interrupted DDL is safe.
         try await sql.raw("""
-            ALTER TABLE classes
-            ADD CONSTRAINT classes_capacity_range
-            CHECK (capacity BETWEEN 1 AND 500);
+            DO $
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1
+                    FROM pg_constraint
+                    WHERE conname = 'classes_capacity_range'
+                      AND conrelid = 'classes'::regclass
+                ) THEN
+                    ALTER TABLE classes
+                    ADD CONSTRAINT classes_capacity_range
+                    CHECK (capacity BETWEEN 1 AND 500);
+                END IF;
+            END
+            $;
             """).run()
     }
 
