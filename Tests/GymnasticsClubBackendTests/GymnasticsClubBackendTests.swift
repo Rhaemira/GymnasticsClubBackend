@@ -1024,15 +1024,15 @@ extension GymnasticsClubBackendTests {
             try await Enrollment(athleteID: try athlete.requireID(), classID: try gymClass.requireID()).save(on: app.db)
 
             try await app.testing().test(.GET, "/analytics", beforeRequest: { request in
-                request.headers.add(name: "Authorization", value: "Bearer \\(token)")
+                request.headers.add(name: "Authorization", value: "Bearer \(token)")
             }, afterResponse: { response async throws in
                 #expect(response.status == .ok)
                 let analytics = try response.content.decode(AnalyticsResponse.self)
-                #expect(analytics.coachWorkload.map(\\.coach) == ["Aggregate Coach"])
-                #expect(analytics.coachWorkload.map(\\.classes) == [1])
-                #expect(analytics.classUtilization.map(\\.className) == ["Aggregate Class"])
-                #expect(analytics.classUtilization.map(\\.enrolled) == [1])
-                #expect(analytics.classUtilization.map(\\.capacity) == [4])
+                #expect(analytics.coachWorkload.map(\.coach) == ["Aggregate Coach"])
+                #expect(analytics.coachWorkload.map(\.classes) == [1])
+                #expect(analytics.classUtilization.map(\.className) == ["Aggregate Class"])
+                #expect(analytics.classUtilization.map(\.enrolled) == [1])
+                #expect(analytics.classUtilization.map(\.capacity) == [4])
             })
         }
     }
