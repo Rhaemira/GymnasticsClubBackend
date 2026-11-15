@@ -1006,6 +1006,8 @@ extension GymnasticsClubBackendTests {
             try await EnforceEnrollmentCapacity().prepare(on: app.db)
             try await EnforceClassCapacityRange().prepare(on: app.db)
             try await EnforceClassCapacityRange().prepare(on: app.db)
+            try await AddQueryIndexes().prepare(on: app.db)
+            try await AddQueryIndexes().prepare(on: app.db)
             try await EnforceAttendanceUniqueness().prepare(on: app.db)
             try await EnforceAttendanceUniqueness().prepare(on: app.db)
         }
