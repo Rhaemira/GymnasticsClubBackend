@@ -145,6 +145,9 @@ jobs:
         run: cp .env.example .env
       - name: Build and start PostgreSQL, migrations and Vapor
         run: docker compose up --build -d
+      - name: Show Compose diagnostics on failure
+        if: failure()
+        run: docker compose logs --no-color || true
       - name: Verify health and authenticated API
         shell: bash
         run: |
