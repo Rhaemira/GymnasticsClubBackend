@@ -121,7 +121,9 @@ Copy `.env.example` to `.env`. The application requires database configuration a
 | `DATABASE_PASSWORD` | Database password |
 | `DATABASE_TLS` | `disable`, `prefer`, or `require` |
 | `AUTH_TOKEN_TTL_SECONDS` | Token lifetime (900–86400 seconds) |
-| `PORT` | HTTP port used by native startup |\n| `BIND_ADDRESS` | Native bind address (defaults to `127.0.0.1`) |\n| `TRUSTED_PROXY_IPS` | Comma-separated immediate proxy IPs permitted to set `X-Real-IP` |
+| `PORT` | HTTP port used by native startup |
+| `BIND_ADDRESS` | Native bind address (defaults to `127.0.0.1`) |
+| `TRUSTED_PROXY_IPS` | Comma-separated immediate proxy IPs permitted to set `X-Real-IP` |
 
 For production, use a secret manager, a dedicated database role, strong unique credentials, and `DATABASE_TLS=require`. Never commit `.env` or place secrets in command history, screenshots, or logs. The Compose-only private-link TLS exception is scoped to its internal database service; do not use it for an external database.
 
@@ -144,7 +146,8 @@ See [API_CONTRACT.md](API_CONTRACT.md) for payload shapes and client integration
 - Passwords are stored with bcrypt; raw passwords are never stored.
 - Login returns a random opaque token once. Only its SHA-256 digest is stored in PostgreSQL.
 - Expired and revoked token digests are opportunistically cleaned during successful login.
-- Login failures are throttled by normalized email and resolved client address using a bounded, pruned in-memory limiter.\n- `X-Real-IP` is honored only when the direct TCP peer matches an exact address in `TRUSTED_PROXY_IPS`; the trusted proxy must overwrite this header.
+- Login failures are throttled by normalized email and resolved client address using a bounded, pruned in-memory limiter.
+- `X-Real-IP` is honored only when the direct TCP peer matches an exact address in `TRUSTED_PROXY_IPS`; the trusted proxy must overwrite this header.
 - The current limiter is **per application instance**. It is not a distributed security boundary. Before horizontal scaling, deploy shared edge rate limiting and configure trusted-proxy address handling.
 - Do not trust arbitrary `X-Forwarded-For` or `X-Real-IP` values. Restrict `TRUSTED_PROXY_IPS` to actual immediate proxy addresses and configure the proxy to overwrite `X-Real-IP`. If proxy addresses are dynamic, keep proxy identity disabled and enforce rate limits at the trusted edge.
 - Server logging is intentionally capped at `info` to avoid emitting SQL bind parameters and sensitive diagnostics.
