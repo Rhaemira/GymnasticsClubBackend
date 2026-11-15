@@ -8,6 +8,7 @@ struct EnforceEnrollmentCapacity: AsyncMigration {
         guard let sql = database as? any SQLDatabase else {
             throw Abort(.internalServerError, reason: "Enrollment capacity migration requires PostgreSQL.")
         }
+
         try await sql.raw("""
             CREATE OR REPLACE FUNCTION gymnastics_check_class_capacity()
             RETURNS trigger AS $$
@@ -42,51 +43,54 @@ struct EnforceEnrollmentCapacity: AsyncMigration {
             $$ LANGUAGE plpgsql;
             """).run()
 
-        // Create missing triggers only, so interrupted DDL can be retried.
-        try await sql.raw("""
-            DO $
-            BEGIN
-                IF NOT EXISTS (
-                    SELECT 1 FROM pg_trigger
-                    WHERE tgname = 'gymnastics_enrollment_capacity'
-                      AND tgrelid = 'enrollments'::regclass
-                      AND NOT tgisinternal
-                ) THEN
-                    CREATE TRIGGER gymnastics_enrollment_capacity
-                    BEFORE INSERT ON enrollments
-                    FOR EACH ROW EXECUTE FUNCTION gymnastics_check_class_capacity();
-                END IF;
+        // Query the PostgreSQL catalog and create each trigger separately.
+        // This avoids non-idempotent DDL and remains safe after partial retries.
+        let enrollmentTrigger = try await sql.raw("""
+            SELECT COUNT(*) AS count FROM pg_trigger
+            WHERE tgname = 'gymnastics_enrollment_capacity'
+              AND tgrelid = 'enrollments'::regclass
+              AND NOT tgisinternal
+            """).first()
+        let enrollmentTriggerCount = try enrollmentTrigger?.decode(column: "count", as: Int64.self) ?? 0
+        if enrollmentTriggerCount == 0 {
+            try await sql.raw("""
+                CREATE TRIGGER gymnastics_enrollment_capacity
+                BEFORE INSERT ON enrollments
+                FOR EACH ROW EXECUTE FUNCTION gymnastics_check_class_capacity()
+                """).run()
+        }
 
-                IF NOT EXISTS (
-                    SELECT 1 FROM pg_trigger
-                    WHERE tgname = 'gymnastics_class_capacity_update'
-                      AND tgrelid = 'classes'::regclass
-                      AND NOT tgisinternal
-                ) THEN
-                    CREATE TRIGGER gymnastics_class_capacity_update
-                    BEFORE UPDATE OF capacity ON classes
-                    FOR EACH ROW EXECUTE FUNCTION gymnastics_check_class_capacity();
-                END IF;
-            END
-            $;
-            """).run()
+        let classTrigger = try await sql.raw("""
+            SELECT COUNT(*) AS count FROM pg_trigger
+            WHERE tgname = 'gymnastics_class_capacity_update'
+              AND tgrelid = 'classes'::regclass
+              AND NOT tgisinternal
+            """).first()
+        let classTriggerCount = try classTrigger?.decode(column: "count", as: Int64.self) ?? 0
+        if classTriggerCount == 0 {
+            try await sql.raw("""
+                CREATE TRIGGER gymnastics_class_capacity_update
+                BEFORE UPDATE OF capacity ON classes
+                FOR EACH ROW EXECUTE FUNCTION gymnastics_check_class_capacity()
+                """).run()
+        }
 
         // Supports class-scoped capacity counts and analytics joins.
         try await sql.raw("""
             CREATE INDEX IF NOT EXISTS enrollments_class_id_idx
-            ON enrollments (class_id);
+            ON enrollments (class_id)
             """).run()
         try await sql.raw("""
             CREATE INDEX IF NOT EXISTS enrollments_athlete_id_idx
-            ON enrollments (athlete_id);
+            ON enrollments (athlete_id)
             """).run()
         try await sql.raw("""
             CREATE INDEX IF NOT EXISTS classes_coach_id_idx
-            ON classes (coach_id);
+            ON classes (coach_id)
             """).run()
         try await sql.raw("""
             CREATE INDEX IF NOT EXISTS attendance_class_id_idx
-            ON attendance (class_id);
+            ON attendance (class_id)
             """).run()
     }
 
