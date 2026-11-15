@@ -69,7 +69,7 @@ Compose starts PostgreSQL, waits for readiness, applies migrations, and then sta
 docker compose down
 ```
 
-**Do not use `docker compose down -v` on a database whose data you want to keep.** PostgreSQL is not published to the host by default; the API binds to localhost by default. Put the API behind a TLS-terminating reverse proxy for remote access.
+**Do not use `docker compose down -v` on a database whose data you want to keep.** PostgreSQL is not published to the host by default; the API port is published on `127.0.0.1` by default. Set `APP_BIND_ADDRESS` only when intentionally exposing the host port on another interface, and put remote access behind a TLS-terminating reverse proxy.
 
 ### Option B — Native macOS
 
@@ -122,8 +122,8 @@ Copy `.env.example` to `.env`. The application requires database configuration a
 | `DATABASE_TLS` | `disable`, `prefer`, or `require` |
 | `AUTH_TOKEN_TTL_SECONDS` | Token lifetime (900–86400 seconds) |
 | `PORT` | HTTP port used by native startup |
-| `BIND_ADDRESS` | Native bind address (defaults to `127.0.0.1`) |
-| `TRUSTED_PROXY_IPS` | Comma-separated immediate proxy IPs permitted to set `X-Real-IP` |
+| `BIND_ADDRESS` | Native server bind address (defaults to `127.0.0.1`) |\n| `APP_BIND_ADDRESS` | Docker Compose host-side API port bind (defaults to `127.0.0.1`) |
+| `TRUSTED_PROXY_IPS` | Comma-separated immediate proxy IPs permitted to set `X-Real-IP` (native and Compose) |
 
 For production, use a secret manager, a dedicated database role, strong unique credentials, and `DATABASE_TLS=require`. Never commit `.env` or place secrets in command history, screenshots, or logs. The Compose-only private-link TLS exception is scoped to its internal database service; do not use it for an external database.
 
