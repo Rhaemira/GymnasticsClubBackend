@@ -75,23 +75,7 @@ struct EnforceEnrollmentCapacity: AsyncMigration {
                 """).run()
         }
 
-        // Supports class-scoped capacity counts and analytics joins.
-        try await sql.raw("""
-            CREATE INDEX IF NOT EXISTS enrollments_class_id_idx
-            ON enrollments (class_id)
-            """).run()
-        try await sql.raw("""
-            CREATE INDEX IF NOT EXISTS enrollments_athlete_id_idx
-            ON enrollments (athlete_id)
-            """).run()
-        try await sql.raw("""
-            CREATE INDEX IF NOT EXISTS classes_coach_id_idx
-            ON classes (coach_id)
-            """).run()
-        try await sql.raw("""
-            CREATE INDEX IF NOT EXISTS attendance_class_id_idx
-            ON attendance (class_id)
-            """).run()
+
     }
 
     func revert(on database: any Database) async throws {
@@ -99,9 +83,5 @@ struct EnforceEnrollmentCapacity: AsyncMigration {
         try await sql.raw("DROP TRIGGER IF EXISTS gymnastics_enrollment_capacity ON enrollments;").run()
         try await sql.raw("DROP TRIGGER IF EXISTS gymnastics_class_capacity_update ON classes;").run()
         try await sql.raw("DROP FUNCTION IF EXISTS gymnastics_check_class_capacity();").run()
-        try await sql.raw("DROP INDEX IF EXISTS attendance_class_id_idx;").run()
-        try await sql.raw("DROP INDEX IF EXISTS classes_coach_id_idx;").run()
-        try await sql.raw("DROP INDEX IF EXISTS enrollments_athlete_id_idx;").run()
-        try await sql.raw("DROP INDEX IF EXISTS enrollments_class_id_idx;").run()
     }
 }
