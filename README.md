@@ -98,15 +98,28 @@ The startup script checks PostgreSQL readiness and port availability. Native sta
 
 ## Create the first administrator
 
-There is no public administrator-registration endpoint. Create the initial administrator using the interactive script:
+There is no public administrator-registration endpoint.
+
+**Native macOS:** use the interactive script; it prompts without echo:
 
 ```bash
 Scripts/create-admin.sh
 ```
 
-The password is prompted without echo. Passwords must contain at least 12 characters and no more than 72 UTF-8 bytes (the bcrypt input limit).
+**Docker Compose:** read the password silently into a shell variable, then pass it through the process environment (not the command line or shell history):
 
-For automation or CI, the command supports environment-provided credentials; use temporary credentials and ensure logs are masked. Never reuse CI credentials in a real environment.
+```bash
+read -r -p "Administrator email: " ADMIN_EMAIL
+read -r -s -p "Administrator password: " ADMIN_INITIAL_PASSWORD
+echo
+docker compose run --rm \
+  -e ADMIN_EMAIL \
+  -e ADMIN_INITIAL_PASSWORD \
+  app create-admin
+unset ADMIN_INITIAL_PASSWORD
+```
+
+Passwords must contain at least 12 characters and no more than 72 UTF-8 bytes (the bcrypt input limit). Use temporary credentials in CI, mask them in logs, and never reuse CI credentials in a real environment.
 
 ## Configuration
 
