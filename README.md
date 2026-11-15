@@ -139,7 +139,7 @@ For production, use a secret manager, a dedicated database role, strong unique c
 | Club management | `/athletes`, `/coaches`, `/classes`, `/enrollments`, `/attendance` | Bearer token |
 | Insights | dashboard, reports, analytics routes | Bearer token |
 
-See [API_CONTRACT.md](API_CONTRACT.md) for payload shapes and client integration details. The health endpoint reports database readiness; it is not a substitute for monitoring, alerting, or an authenticated application-level check.
+See [API_CONTRACT.md](API_CONTRACT.md) for payload shapes and client integration details. JSON request bodies are capped at 1 MiB. The health endpoint reports database readiness; it is not a substitute for monitoring, alerting, or an authenticated application-level check.
 
 ## Security model and operational limits
 
@@ -187,6 +187,10 @@ A green CI run verifies the configured automated checks; it does not by itself c
 - [ ] Configure shared edge rate limiting before running multiple app instances; the in-process limiter is only a per-instance secondary control.
 - [ ] Monitor health, logs, database capacity, and authentication failures.
 - [ ] Back up PostgreSQL and test restore procedures.
+
+## Operations
+
+See [docs/OPERATIONS.md](docs/OPERATIONS.md) for PostgreSQL backup, restore-drill and production deployment procedures. A persistent database volume is not a backup; test restores regularly.
 
 ## Contributing
 
