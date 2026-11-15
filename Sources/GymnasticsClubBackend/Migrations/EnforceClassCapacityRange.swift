@@ -10,47 +10,46 @@ struct EnforceClassCapacityRange: AsyncMigration {
             throw Abort(.internalServerError, reason: "Class capacity migration requires PostgreSQL.")
         }
 
-        try await sql.raw("""
-            DO $$
-            BEGIN
-                IF EXISTS (
-                    SELECT 1 FROM classes WHERE capacity NOT BETWEEN 1 AND 500
-                ) THEN
-                    RAISE EXCEPTION
-                        'class_capacity_range_invalid: existing classes have capacity outside 1...500; review them before applying this migration';
-                END IF;
+        let invalidCapacityRow = try await sql.raw("""
+            SELECT COUNT(*) AS count
+            FROM classes
+            WHERE capacity NOT BETWEEN 1 AND 500
+            """).first()
+        let invalidCapacityCount = try invalidCapacityRow?.decode(column: "count", as: Int64.self) ?? 0
+        guard invalidCapacityCount == 0 else {
+            throw Abort(.internalServerError, reason: "Existing classes have capacity outside 1...500; review them before applying this migration.")
+        }
 
-                IF EXISTS (
-                    SELECT c.id
-                    FROM classes c
-                    LEFT JOIN enrollments e ON e.class_id = c.id
-                    GROUP BY c.id, c.capacity
-                    HAVING COUNT(e.id) > c.capacity
-                ) THEN
-                    RAISE EXCEPTION
-                        'class_capacity_below_enrollment: existing classes exceed their configured capacity; reconcile enrollment data before applying this migration';
-                END IF;
-            END
-            $$;
-            """).run()
+        let overCapacityRow = try await sql.raw("""
+            SELECT COUNT(*) AS count
+            FROM (
+                SELECT c.id
+                FROM classes c
+                LEFT JOIN enrollments e ON e.class_id = c.id
+                GROUP BY c.id, c.capacity
+                HAVING COUNT(e.id) > c.capacity
+            ) AS invalid_classes
+            """).first()
+        let overCapacityCount = try overCapacityRow?.decode(column: "count", as: Int64.self) ?? 0
+        guard overCapacityCount == 0 else {
+            throw Abort(.internalServerError, reason: "Existing classes exceed their configured capacity; reconcile enrollment data before applying this migration.")
+        }
 
-        // Guard constraint creation so a retry after interrupted DDL is safe.
-        try await sql.raw("""
-            DO $
-            BEGIN
-                IF NOT EXISTS (
-                    SELECT 1
-                    FROM pg_constraint
-                    WHERE conname = 'classes_capacity_range'
-                      AND conrelid = 'classes'::regclass
-                ) THEN
-                    ALTER TABLE classes
-                    ADD CONSTRAINT classes_capacity_range
-                    CHECK (capacity BETWEEN 1 AND 500);
-                END IF;
-            END
-            $;
-            """).run()
+        // Catalog lookup followed by conditional DDL is safe to retry.
+        let constraintRow = try await sql.raw("""
+            SELECT COUNT(*) AS count
+            FROM pg_constraint
+            WHERE conname = 'classes_capacity_range'
+              AND conrelid = 'classes'::regclass
+            """).first()
+        let constraintCount = try constraintRow?.decode(column: "count", as: Int64.self) ?? 0
+        if constraintCount == 0 {
+            try await sql.raw("""
+                ALTER TABLE classes
+                ADD CONSTRAINT classes_capacity_range
+                CHECK (capacity BETWEEN 1 AND 500)
+                """).run()
+        }
     }
 
     func revert(on database: any Database) async throws {
