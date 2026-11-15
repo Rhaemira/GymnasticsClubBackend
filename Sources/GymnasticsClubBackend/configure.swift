@@ -67,6 +67,8 @@ public func configure(_ app: Application) async throws {
 
     app.asyncCommands.use(SeedData(), as: "seed")
     app.asyncCommands.use(CreateAdminCommand(), as: "create-admin")
+    // The API accepts only small JSON payloads; cap bodies before decoding to limit memory abuse.
+    app.routes.defaultMaxBodySize = "1mb"
     app.middleware.use(SecurityHeadersMiddleware())
     app.storage[LoginRateLimiterKey.self] = LoginRateLimiter()
     try routes(app)
