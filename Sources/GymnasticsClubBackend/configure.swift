@@ -64,6 +64,7 @@ public func configure(_ app: Application) async throws {
     app.migrations.add(EnforceEnrollmentCapacity())
     app.migrations.add(EnforceClassCapacityRange())
     app.migrations.add(EnforceAttendanceUniqueness())
+    app.migrations.add(AddQueryIndexes())
 
     app.asyncCommands.use(SeedData(), as: "seed")
     app.asyncCommands.use(CreateAdminCommand(), as: "create-admin")
