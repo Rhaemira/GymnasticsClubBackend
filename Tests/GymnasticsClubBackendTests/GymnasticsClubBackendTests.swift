@@ -976,3 +976,64 @@ extension GymnasticsClubBackendTests {
         #expect(try RequestValidation.athleteLevel("elite") == "Elite")
     }
 }
+
+
+extension GymnasticsClubBackendTests {
+    @Test("Login client identity trusts X-Real-IP only from an allowlisted proxy")
+    func clientAddressResolverRequiresTrustedProxy() {
+        let trusted = Set(["10.0.0.10"])
+        #expect(ClientAddressResolver.resolve(
+            remoteAddress: "203.0.113.8",
+            realIPHeader: "198.51.100.9",
+            trustedProxyIPs: trusted
+        ) == "203.0.113.8")
+        #expect(ClientAddressResolver.resolve(
+            remoteAddress: "10.0.0.10",
+            realIPHeader: "198.51.100.9",
+            trustedProxyIPs: trusted
+        ) == "198.51.100.9")
+        #expect(ClientAddressResolver.resolve(
+            remoteAddress: "10.0.0.10",
+            realIPHeader: "not-an-ip",
+            trustedProxyIPs: trusted
+        ) == "10.0.0.10")
+    }
+
+    @Test("Integrity migrations can safely prepare twice")
+    func integrityMigrationsAreRetrySafe() async throws {
+        try await withApp { app in
+            try await EnforceEnrollmentCapacity().prepare(on: app.db)
+            try await EnforceEnrollmentCapacity().prepare(on: app.db)
+            try await EnforceClassCapacityRange().prepare(on: app.db)
+            try await EnforceClassCapacityRange().prepare(on: app.db)
+            try await EnforceAttendanceUniqueness().prepare(on: app.db)
+            try await EnforceAttendanceUniqueness().prepare(on: app.db)
+        }
+    }
+
+    @Test("Analytics returns grouped coach workload and class utilization")
+    func analyticsUsesGroupedAggregates() async throws {
+        try await withApp { app in
+            let token = try await makeAuthenticatedToken(on: app, email: "aggregate-analytics@example.test")
+            let coach = Coach(fullName: "Aggregate Coach", specialty: "Artistic")
+            let athlete = Athlete(fullName: "Aggregate Athlete", age: 12, level: "Beginner")
+            try await coach.save(on: app.db)
+            try await athlete.save(on: app.db)
+            let gymClass = Class(name: "Aggregate Class", capacity: 4, coachID: try coach.requireID())
+            try await gymClass.save(on: app.db)
+            try await Enrollment(athleteID: try athlete.requireID(), classID: try gymClass.requireID()).save(on: app.db)
+
+            try await app.testing().test(.GET, "/analytics", beforeRequest: { request in
+                request.headers.add(name: "Authorization", value: "Bearer \\(token)")
+            }, afterResponse: { response async throws in
+                #expect(response.status == .ok)
+                let analytics = try response.content.decode(AnalyticsResponse.self)
+                #expect(analytics.coachWorkload.map(\\.coach) == ["Aggregate Coach"])
+                #expect(analytics.coachWorkload.map(\\.classes) == [1])
+                #expect(analytics.classUtilization.map(\\.className) == ["Aggregate Class"])
+                #expect(analytics.classUtilization.map(\\.enrolled) == [1])
+                #expect(analytics.classUtilization.map(\\.capacity) == [4])
+            })
+        }
+    }
+}
