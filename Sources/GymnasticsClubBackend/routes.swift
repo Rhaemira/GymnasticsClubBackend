@@ -1,5 +1,6 @@
 import Fluent
 import Vapor
+import SQLKit
 
 func routes(_ app: Application) throws {
     let protected = app.grouped(AccessTokenAuthenticator(), AdminUser.guardMiddleware())
@@ -23,7 +24,18 @@ func routes(_ app: Application) throws {
         guard let loginRateLimiter = req.application.storage[LoginRateLimiterKey.self] else {
             throw Abort(.internalServerError, reason: "Login protection is unavailable.")
         }
-        let ipKey = "ip:\(req.remoteAddress?.ipAddress ?? "unknown")"
+        let trustedProxyIPs = Set(
+            (Environment.get("TRUSTED_PROXY_IPS") ?? "")
+                .split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+        )
+        let clientAddress = ClientAddressResolver.resolve(
+            remoteAddress: req.remoteAddress?.ipAddress,
+            realIPHeader: req.headers.first(name: "X-Real-IP"),
+            trustedProxyIPs: trustedProxyIPs
+        )
+        let ipKey = "ip:\(clientAddress)"
         let accountKey = "account:\(email)"
         let rateLimitKeys = [ipKey, accountKey]
         guard let attemptID = await loginRateLimiter.beginAttempt(for: rateLimitKeys) else {
@@ -616,130 +628,91 @@ func routes(_ app: Application) throws {
     }
     
     protected.get("analytics") { req async throws -> AnalyticsResponse in
+        async let athleteCount = Athlete.query(on: req.db).count()
+        async let coachCount = Coach.query(on: req.db).count()
+        async let classCount = Class.query(on: req.db).count()
+        async let enrollmentCount = Enrollment.query(on: req.db).count()
+        async let attendanceCount = Attendance.query(on: req.db).count()
 
-        async let athleteCount =
-            Athlete.query(on: req.db).count()
+        guard let sql = req.db as? any SQLDatabase else {
+            throw Abort(.internalServerError, reason: "Analytics requires a SQL database.")
+        }
 
-        async let coachCount =
-            Coach.query(on: req.db).count()
-
-        async let classCount =
-            Class.query(on: req.db).count()
-
-        async let enrollmentCount =
-            Enrollment.query(on: req.db).count()
-
-        async let attendanceCount =
-            Attendance.query(on: req.db).count()
-
-        let athletes =
-            try await Athlete.query(on: req.db).all()
-
-        let coaches =
-            try await Coach.query(on: req.db)
-                .with(\.$classes)
-                .all()
-
-        let classes =
-            try await Class.query(on: req.db)
-                .all()
+        // Aggregate in PostgreSQL rather than loading every row or issuing
+        // one enrollment-count query per class.
+        let levelRows = try await sql.raw("""
+            SELECT level, COUNT(*) AS count
+            FROM athletes
+            GROUP BY level
+            """).all()
         let canonicalLevelOrder = [
             "Beginner": 0,
             "Intermediate": 1,
             "Advanced": 2,
             "Elite": 3
         ]
-        let athleteLevels = Dictionary(
-            grouping: athletes,
-            by: { athlete in
-                (try? RequestValidation.athleteLevel(athlete.level))
-                    ?? athlete.level.trimmingCharacters(in: .whitespacesAndNewlines)
-            }
-        )
-        .map { LevelResponse(level: $0.key, count: $0.value.count) }
-        .sorted { left, right in
+        var levelCounts: [String: Int] = [:]
+        for row in levelRows {
+            let storedLevel = try row.decode(column: "level", as: String.self)
+            let level = (try? RequestValidation.athleteLevel(storedLevel))
+                ?? storedLevel.trimmingCharacters(in: .whitespacesAndNewlines)
+            let count = try row.decode(column: "count", as: Int64.self)
+            levelCounts[level, default: 0] += Int(count)
+        }
+        let athleteLevels = levelCounts.map {
+            LevelResponse(level: $0.key, count: $0.value)
+        }.sorted { left, right in
             let leftRank = canonicalLevelOrder[left.level] ?? Int.max
             let rightRank = canonicalLevelOrder[right.level] ?? Int.max
             if leftRank != rightRank { return leftRank < rightRank }
             return left.level.localizedStandardCompare(right.level) == .orderedAscending
         }
-        
-        let coachWorkload =
 
-            coaches.map {
-
-                CoachWorkloadResponse(
-
-                    coach: $0.fullName,
-
-                    classes: $0.classes.count
-
-                )
-
-            }
-        
-        var utilization: [ClassUtilizationResponse] = []
-
-        for gymClass in classes {
-
-            guard let classID = gymClass.id else {
-
-                continue
-
-            }
-
-            let enrolled =
-
-                try await Enrollment.query(on: req.db)
-
-                    .filter(\.$gymClass.$id == classID)
-
-                    .count()
-
-            utilization.append(
-
-                ClassUtilizationResponse(
-
-                    className: gymClass.name,
-
-                    enrolled: enrolled,
-
-                    capacity: gymClass.capacity
-
-                )
-
+        let coachRows = try await sql.raw("""
+            SELECT coach.full_name AS coach, COUNT(gym_class.id) AS classes
+            FROM coaches AS coach
+            LEFT JOIN classes AS gym_class ON gym_class.coach_id = coach.id
+            GROUP BY coach.id, coach.full_name
+            ORDER BY coach.full_name
+            """).all()
+        let coachWorkload = try coachRows.map { row in
+            CoachWorkloadResponse(
+                coach: try row.decode(column: "coach", as: String.self),
+                classes: Int(try row.decode(column: "classes", as: Int64.self))
             )
-
         }
-        
+
+        let utilizationRows = try await sql.raw("""
+            SELECT gym_class.name AS class_name,
+                   COUNT(enrollment.id) AS enrolled,
+                   gym_class.capacity AS capacity
+            FROM classes AS gym_class
+            LEFT JOIN enrollments AS enrollment ON enrollment.class_id = gym_class.id
+            GROUP BY gym_class.id, gym_class.name, gym_class.capacity
+            ORDER BY gym_class.name
+            """).all()
+        let classUtilization = try utilizationRows.map { row in
+            ClassUtilizationResponse(
+                className: try row.decode(column: "class_name", as: String.self),
+                enrolled: Int(try row.decode(column: "enrolled", as: Int64.self)),
+                capacity: try row.decode(column: "capacity", as: Int.self)
+            )
+        }
+
         return AnalyticsResponse(
-
-            overview:
-
-                OverviewResponse(
-
-                    athletes: try await athleteCount,
-
-                    coaches: try await coachCount,
-
-                    classes: try await classCount,
-
-                    enrollments: try await enrollmentCount,
-
-                    attendance: try await attendanceCount
-
-                ),
-
+            overview: OverviewResponse(
+                athletes: try await athleteCount,
+                coaches: try await coachCount,
+                classes: try await classCount,
+                enrollments: try await enrollmentCount,
+                attendance: try await attendanceCount
+            ),
             athleteLevels: athleteLevels,
-
             coachWorkload: coachWorkload,
-
-            classUtilization: utilization
-
+            classUtilization: classUtilization
         )
-
     }
-    
+
     // Athelete UPDATE
     
     protected.put("athletes", ":athleteID") { req async throws -> Athlete in
