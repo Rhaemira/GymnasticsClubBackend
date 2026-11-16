@@ -1,68 +1,72 @@
-//
-//  SeedData.swift
-//  GymnasticsClubBackend
-//
-//  Created by Amirali Yazdani on 6/14/26.
-//
-
 import Fluent
 import Vapor
 
-struct SeedData: Command {
-    
+/// Idempotent development seed command. Existing matching records are reused,
+/// and existing enrollments are never duplicated.
+struct SeedData: AsyncCommand {
     struct Signature: CommandSignature {}
-    
+
     var help: String {
-        "Populate database with sample data"
+        "Populate the development database with sample gymnastics data."
     }
-    
-    func run(
-        using context: CommandContext,
-        signature: Signature
-    ) throws {
-        let promise = context.application.eventLoopGroup.next().makePromise(of: Void.self)
-        promise.completeWithTask {
-            let db = context.application.db
-            
-            let coach = Coach(
-                fullName: "Sara Ahmadi",
-                specialty: "Artistic Gymnastics"
-            )
-            try await coach.save(on: db)
-            
-            let athlete1 = Athlete(
-                fullName: "Amirali",
-                age: 21,
-                level: "Advanced"
-            )
-            let athlete2 = Athlete(
-                fullName: "Reza",
-                age: 18,
-                level: "Beginner"
-            )
-            try await athlete1.save(on: db)
-            try await athlete2.save(on: db)
-            
-            let gymClass = Class(
+
+    func run(using context: CommandContext, signature: Signature) async throws {
+        let db = context.application.db
+
+        let coach: Coach
+        if let existing = try await Coach.query(on: db)
+            .filter(\.$fullName == "Sara Ahmadi")
+            .first() {
+            coach = existing
+        } else {
+            let created = Coach(fullName: "Sara Ahmadi", specialty: "Artistic Gymnastics")
+            try await created.save(on: db)
+            coach = created
+        }
+
+        let athlete1 = try await athlete(named: "Amirali", age: 21, level: "Advanced", on: db)
+        let athlete2 = try await athlete(named: "Reza", age: 18, level: "Beginner", on: db)
+
+        let gymClass: Class
+        if let existing = try await Class.query(on: db)
+            .filter(\.$name == "Advanced Floor")
+            .first() {
+            gymClass = existing
+        } else {
+            let created = Class(
                 name: "Advanced Floor",
                 capacity: 15,
                 coachID: try coach.requireID()
             )
-            try await gymClass.save(on: db)
-            
-            let enrollment1 = Enrollment(
-                athleteID: try athlete1.requireID(),
-                classID: try gymClass.requireID()
-            )
-            let enrollment2 = Enrollment(
-                athleteID: try athlete2.requireID(),
-                classID: try gymClass.requireID()
-            )
-            try await enrollment1.save(on: db)
-            try await enrollment2.save(on: db)
-            
-            context.console.print("Seed complete ✅")
+            try await created.save(on: db)
+            gymClass = created
         }
-        try promise.futureResult.wait()
+
+        try await ensureEnrollment(for: athlete1, in: gymClass, on: db)
+        try await ensureEnrollment(for: athlete2, in: gymClass, on: db)
+
+        context.console.print("Seed data is ready.")
+    }
+
+    private func athlete(named name: String, age: Int, level: String, on db: any Database) async throws -> Athlete {
+        if let existing = try await Athlete.query(on: db)
+            .filter(\.$fullName == name)
+            .first() {
+            return existing
+        }
+        let created = Athlete(fullName: name, age: age, level: level)
+        try await created.save(on: db)
+        return created
+    }
+
+    private func ensureEnrollment(for athlete: Athlete, in gymClass: Class, on db: any Database) async throws {
+        let athleteID = try athlete.requireID()
+        let classID = try gymClass.requireID()
+        let existing = try await Enrollment.query(on: db)
+            .filter(\.$athlete.$id == athleteID)
+            .filter(\.$gymClass.$id == classID)
+            .first()
+        guard existing == nil else { return }
+        try await Enrollment(athleteID: athleteID, classID: classID).save(on: db)
     }
 }
